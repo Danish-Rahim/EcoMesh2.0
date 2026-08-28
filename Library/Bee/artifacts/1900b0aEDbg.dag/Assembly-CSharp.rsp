@@ -135,6 +135,7 @@
 -define:ENABLE_TILEMAP
 -define:ENABLE_TIMELINE
 -define:ENABLE_INPUT_SYSTEM
+-define:ENABLE_LEGACY_INPUT_MANAGER
 -define:TEXTCORE_FONT_ENGINE_1_5_OR_NEWER
 -define:TEXTCORE_TEXT_ENGINE_1_5_OR_NEWER
 -define:TEXTCORE_FONT_ENGINE_1_6_OR_NEWER
@@ -536,14 +537,14 @@
 "Assets/TextMesh Pro/Examples & Extras/Scripts/VertexZoom.cs"
 "Assets/TextMesh Pro/Examples & Extras/Scripts/WarpTextExample.cs"
 "Assets/TutorialInfo/Scripts/Readme.cs"
+"Assets/_Project/Scripts/InteractiveTooltipManager.cs"
 "Assets/_Project/Scripts/MeshProfile.cs"
-"Assets/_Project/Scripts/ReactorSimulation.cs"
-"Assets/_Project/Scripts/RefinerySimulationEngine.cs"
+"Assets/_Project/Scripts/RefineryInteractiveElement.cs"
 "Assets/_Project/Scripts/SimpleGraph.cs"
-"Assets/_Project/Scripts/SimpleTrendGraph.cs"
 "Assets/_Project/Scripts/SpinModel.cs"
 "Assets/_Project/Scripts/TabNavigationManager.cs"
 "Assets/_Project/Scripts/UIValueUpdater.cs"
+"Assets/_Project/Scripts/UnifiedRefinerySimulator.cs"
 -langversion:9.0
 /deterministic
 /optimize-

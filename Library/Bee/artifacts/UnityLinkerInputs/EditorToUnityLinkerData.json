@@ -194,13 +194,6 @@
             "usedInScenes": []
         },
         {
-            "managedAssemblyName": "Unity.TextMeshPro.dll",
-            "nativeClass": "",
-            "fullManagedTypeName": "TMPro.TMP_SubMeshUI",
-            "moduleName": "",
-            "usedInScenes": []
-        },
-        {
             "managedAssemblyName": "Assembly-CSharp.dll",
             "nativeClass": "",
             "fullManagedTypeName": "UIValueUpdater",

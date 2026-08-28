@@ -88,7 +88,6 @@
 		<type fullname="TMPro.TMP_Settings" preserve="nothing"/>
 		<type fullname="TMPro.TMP_SpriteAsset" preserve="nothing"/>
 		<type fullname="TMPro.TMP_StyleSheet" preserve="nothing"/>
-		<type fullname="TMPro.TMP_SubMeshUI" preserve="nothing"/>
 	</assembly>
 	<assembly fullname="UnityEngine">
 		<type fullname="UnityEditor.AudioManager" preserve="nothing"/>
