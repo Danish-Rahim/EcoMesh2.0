@@ -1,7 +1,8 @@
-using UnityEngine;
-using UnityEngine.UI;
-using TMPro;
 using System.Collections.Generic;
+using TMPro;
+using UnityEngine;
+using UnityEngine.EventSystems;
+using UnityEngine.UI;
 
 public class UnifiedRefinerySimulator : MonoBehaviour
 {
@@ -1028,6 +1029,11 @@ public class UnifiedRefinerySimulator : MonoBehaviour
     {
         try
         {
+            // If time is frozen (because the popup is open), disable the 3D zoom!
+            if (Time.timeScale == 0f)
+            {
+                return;
+            }
             if (studioCamera != null && Mathf.Abs(Input.mouseScrollDelta.y) > 0.01f)
             {
                 if (studioCamera.orthographic)

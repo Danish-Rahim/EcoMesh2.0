@@ -41,6 +41,13 @@
             "usedInScenes": []
         },
         {
+            "managedAssemblyName": "Assembly-CSharp.dll",
+            "nativeClass": "",
+            "fullManagedTypeName": "InteractiveTooltipManager",
+            "moduleName": "",
+            "usedInScenes": []
+        },
+        {
             "managedAssemblyName": "",
             "nativeClass": "LevelGameManager",
             "fullManagedTypeName": "",
@@ -100,6 +107,20 @@
             "nativeClass": "PhysicsManager",
             "fullManagedTypeName": "",
             "moduleName": "Physics",
+            "usedInScenes": []
+        },
+        {
+            "managedAssemblyName": "Assembly-CSharp.dll",
+            "nativeClass": "",
+            "fullManagedTypeName": "Readme",
+            "moduleName": "",
+            "usedInScenes": []
+        },
+        {
+            "managedAssemblyName": "Assembly-CSharp.dll",
+            "nativeClass": "",
+            "fullManagedTypeName": "RefineryInteractiveElement",
+            "moduleName": "",
             "usedInScenes": []
         },
         {
@@ -308,6 +329,15 @@
         },
         {
             "managedAssemblyName": "UnityEngine.dll",
+            "nativeClass": "BoxCollider",
+            "fullManagedTypeName": "UnityEngine.BoxCollider",
+            "moduleName": "Physics",
+            "usedInScenes": [
+                "Assets/Scenes/SampleScene.unity"
+            ]
+        },
+        {
+            "managedAssemblyName": "UnityEngine.dll",
             "nativeClass": "Camera",
             "fullManagedTypeName": "UnityEngine.Camera",
             "moduleName": "Core",
@@ -338,6 +368,15 @@
             "nativeClass": "CanvasRenderer",
             "fullManagedTypeName": "UnityEngine.CanvasRenderer",
             "moduleName": "UI",
+            "usedInScenes": [
+                "Assets/Scenes/SampleScene.unity"
+            ]
+        },
+        {
+            "managedAssemblyName": "UnityEngine.dll",
+            "nativeClass": "Collider",
+            "fullManagedTypeName": "UnityEngine.Collider",
+            "moduleName": "Physics",
             "usedInScenes": [
                 "Assets/Scenes/SampleScene.unity"
             ]
@@ -456,6 +495,15 @@
             "managedAssemblyName": "UnityEngine.dll",
             "nativeClass": "LightmapSettings",
             "fullManagedTypeName": "UnityEngine.LightmapSettings",
+            "moduleName": "Core",
+            "usedInScenes": [
+                "Assets/Scenes/SampleScene.unity"
+            ]
+        },
+        {
+            "managedAssemblyName": "UnityEngine.dll",
+            "nativeClass": "LineRenderer",
+            "fullManagedTypeName": "UnityEngine.LineRenderer",
             "moduleName": "Core",
             "usedInScenes": [
                 "Assets/Scenes/SampleScene.unity"

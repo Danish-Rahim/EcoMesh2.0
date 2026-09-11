@@ -5,7 +5,6 @@ using TMPro;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine.InputSystem;
-using System;
 
 public class InteractiveTooltipManager : MonoBehaviour
 {
@@ -16,152 +15,213 @@ public class InteractiveTooltipManager : MonoBehaviour
     public TextMeshProUGUI descriptionText;
     public Button closeButton;
 
-    [Header("Cone Visual Indicator")]
-    public LineRenderer coneRenderer;
-    public RectTransform popupTransform;
-
     [Header("Animation Settings")]
     public float typeSpeed = 0.015f;
+
+    [Header("Guided Tour Demo")]
+    public Button tourButton;
+    public Button nextButton;
+    public Button prevButton;
+    public List<RefineryInteractiveElement> tourElements;
+
+    private bool isTourActive = false;
+    private int currentTourIndex = 0;
 
     private Camera mainCamera;
     private Coroutine typingCoroutine;
 
+    // --- COLOR TRACKING DICTIONARIES ---
+    private Dictionary<TMP_Text, Color> originalTMPColors = new Dictionary<TMP_Text, Color>();
+    private Dictionary<Graphic, Color> originalGraphicColors = new Dictionary<Graphic, Color>();
+    private Dictionary<SpriteRenderer, Color> originalSpriteColors = new Dictionary<SpriteRenderer, Color>();
+
     void Start()
     {
-        try
-        {
-            mainCamera = Camera.main;
-            ClosePopup();
+        mainCamera = Camera.main;
 
-            if (closeButton != null)
-            {
-                closeButton.onClick.AddListener(ClosePopup);
-            }
+        if (closeButton != null) closeButton.onClick.AddListener(ClosePopup);
+        if (tourButton != null) tourButton.onClick.AddListener(StartGuidedTour);
+        if (nextButton != null) nextButton.onClick.AddListener(NextTourElement);
+        if (prevButton != null) prevButton.onClick.AddListener(PreviousTourElement);
 
-            if (coneRenderer != null)
-            {
-                coneRenderer.positionCount = 2;
-                coneRenderer.startWidth = 0.02f;
-                coneRenderer.endWidth = 0.5f;
-                coneRenderer.useWorldSpace = true;
-            }
-        }
-        catch (Exception e)
-        {
-            Debug.LogError($"[InteractiveTooltipManager] Exception in Start: {e.Message}\n{e.StackTrace}");
-        }
+        ClosePopup();
     }
 
     void Update()
     {
-        try
-        {
-            if (Keyboard.current == null || Mouse.current == null) return;
+        if (Keyboard.current == null || Mouse.current == null) return;
 
-            bool isCtrlPressed = Keyboard.current.leftCtrlKey.isPressed || Keyboard.current.rightCtrlKey.isPressed;
-            bool isLeftClickPressed = Mouse.current.leftButton.wasPressedThisFrame;
+        bool isCtrlPressed = Keyboard.current.leftCtrlKey.isPressed || Keyboard.current.rightCtrlKey.isPressed;
+        bool isLeftClickPressed = Mouse.current.leftButton.wasPressedThisFrame;
 
-            if (isCtrlPressed && isLeftClickPressed)
-            {
-                ProcessClick();
-            }
-        }
-        catch (Exception e)
+        if (isCtrlPressed && isLeftClickPressed && !isTourActive)
         {
-            Debug.LogError($"[InteractiveTooltipManager] Exception in Update: {e.Message}\n{e.StackTrace}");
+            ProcessClick();
         }
     }
 
     private void ProcessClick()
     {
-        try
+        if (mainCamera == null)
         {
-            if (mainCamera == null)
+            mainCamera = Camera.main;
+            if (mainCamera == null) return;
+        }
+
+        Vector2 mouseScreenPos = Mouse.current.position.ReadValue();
+        RefineryInteractiveElement clickedElement = null;
+
+        // 1. Check UI Canvas clicks first
+        PointerEventData pointerData = new PointerEventData(EventSystem.current) { position = mouseScreenPos };
+        List<RaycastResult> raycastResults = new List<RaycastResult>();
+        EventSystem.current.RaycastAll(pointerData, raycastResults);
+
+        foreach (RaycastResult result in raycastResults)
+        {
+            clickedElement = result.gameObject.GetComponentInParent<RefineryInteractiveElement>();
+            if (clickedElement != null) break;
+        }
+
+        // 2. Check 2D/3D World clicks if no UI was hit
+        if (clickedElement == null)
+        {
+            Ray ray = mainCamera.ScreenPointToRay(mouseScreenPos);
+            if (Physics.Raycast(ray, out RaycastHit hit))
             {
-                mainCamera = Camera.main;
-                if (mainCamera == null)
-                {
-                    Debug.LogError("[InteractiveTooltipManager] ERROR: No active camera tagged as 'MainCamera' found!");
-                    return;
-                }
-            }
-
-            Vector2 mouseScreenPos = Mouse.current.position.ReadValue();
-
-            RefineryInteractiveElement clickedElement = null;
-            Vector3 targetPoint = Vector3.zero;
-
-            // 1. UI Raycast Check
-            PointerEventData pointerData = new PointerEventData(EventSystem.current)
-            {
-                position = mouseScreenPos
-            };
-
-            List<RaycastResult> raycastResults = new List<RaycastResult>();
-            EventSystem.current.RaycastAll(pointerData, raycastResults);
-
-            foreach (RaycastResult result in raycastResults)
-            {
-                clickedElement = result.gameObject.GetComponentInParent<RefineryInteractiveElement>();
-                if (clickedElement != null)
-                {
-                    targetPoint = mainCamera.ScreenToWorldPoint(new Vector3(result.gameObject.transform.position.x, result.gameObject.transform.position.y, 2.0f));
-                    break;
-                }
-            }
-
-            // 2. 3D World Physics Raycast Check
-            if (clickedElement == null)
-            {
-                Ray ray = mainCamera.ScreenPointToRay(mouseScreenPos);
-                if (Physics.Raycast(ray, out RaycastHit hit))
-                {
-                    clickedElement = hit.collider.GetComponentInParent<RefineryInteractiveElement>();
-                    if (clickedElement != null)
-                    {
-                        targetPoint = clickedElement.customTargetPoint != null ? clickedElement.customTargetPoint.position : hit.point;
-                    }
-                }
-            }
-
-            // 3. Open Tooltip Panel if Element Found
-            if (clickedElement != null)
-            {
-                OpenPopup(clickedElement, targetPoint);
+                clickedElement = hit.collider.GetComponentInParent<RefineryInteractiveElement>();
             }
         }
-        catch (Exception e)
+
+        if (clickedElement != null)
         {
-            Debug.LogError($"[InteractiveTooltipManager] Exception in ProcessClick: {e.Message}\n{e.StackTrace}");
+            OpenPopup(clickedElement);
         }
     }
 
-    private void OpenPopup(RefineryInteractiveElement element, Vector3 startPoint)
+    private void OpenPopup(RefineryInteractiveElement element)
     {
-        try
+        Time.timeScale = 0f;
+
+        if (typingCoroutine != null) StopCoroutine(typingCoroutine);
+
+        // Brighten the colors on the clicked object
+        ApplyHighlight(element);
+
+        dimOverlay.SetActive(true);
+        popupPanel.SetActive(true);
+        titleText.text = element.elementTitle;
+        descriptionText.text = "";
+
+        if (nextButton != null) nextButton.gameObject.SetActive(isTourActive);
+        if (prevButton != null)
         {
-            if (typingCoroutine != null) StopCoroutine(typingCoroutine);
-
-            dimOverlay.SetActive(true);
-            popupPanel.SetActive(true);
-            titleText.text = element.elementTitle;
-            descriptionText.text = "";
-
-            if (coneRenderer != null)
-            {
-                coneRenderer.enabled = true;
-                coneRenderer.SetPosition(0, startPoint);
-
-                Vector3 popupWorldPos = popupTransform.position;
-                popupWorldPos.z = mainCamera.nearClipPlane + 2.0f;
-                coneRenderer.SetPosition(1, mainCamera.ScreenToWorldPoint(popupWorldPos));
-            }
-
-            typingCoroutine = StartCoroutine(TypeText(element.elementExplanation));
+            prevButton.gameObject.SetActive(isTourActive);
+            prevButton.interactable = (currentTourIndex > 0);
         }
-        catch (Exception e)
+
+        typingCoroutine = StartCoroutine(TypeText(element.elementExplanation));
+    }
+
+    private void ApplyHighlight(RefineryInteractiveElement element)
+    {
+        ClearHighlight(); // Make sure previous element is reset
+
+        // 1. Brighten TextMeshPro Text
+        TMP_Text[] tmpTexts = element.GetComponentsInChildren<TMP_Text>();
+        foreach (TMP_Text tmp in tmpTexts)
         {
-            Debug.LogError($"[InteractiveTooltipManager] Exception in OpenPopup: {e.Message}\n{e.StackTrace}");
+            originalTMPColors[tmp] = tmp.color;
+            tmp.color = new Color(tmp.color.r * 2.5f, tmp.color.g * 2.5f, tmp.color.b * 2.5f, tmp.color.a);
+        }
+
+        // 2. Brighten Standard UI Graphics (Images, Backgrounds)
+        Graphic[] graphics = element.GetComponentsInChildren<Graphic>();
+        foreach (Graphic g in graphics)
+        {
+            if (g is TMP_Text) continue; // Skip TMP since we handled it above
+
+            originalGraphicColors[g] = g.color;
+            g.color = new Color(g.color.r * 2.5f, g.color.g * 2.5f, g.color.b * 2.5f, g.color.a);
+        }
+
+        // 3. Brighten standard 2D Sprites (if you are using regular GameObjects instead of UI)
+        SpriteRenderer[] sprites = element.GetComponentsInChildren<SpriteRenderer>();
+        foreach (SpriteRenderer sr in sprites)
+        {
+            originalSpriteColors[sr] = sr.color;
+            sr.color = new Color(sr.color.r * 2.5f, sr.color.g * 2.5f, sr.color.b * 2.5f, sr.color.a);
+        }
+    }
+
+    private void ClearHighlight()
+    {
+        // Restore TextMeshPro colors
+        foreach (KeyValuePair<TMP_Text, Color> entry in originalTMPColors)
+        {
+            if (entry.Key != null) entry.Key.color = entry.Value;
+        }
+        originalTMPColors.Clear();
+
+        // Restore UI Graphic colors
+        foreach (KeyValuePair<Graphic, Color> entry in originalGraphicColors)
+        {
+            if (entry.Key != null) entry.Key.color = entry.Value;
+        }
+        originalGraphicColors.Clear();
+
+        // Restore Sprite colors
+        foreach (KeyValuePair<SpriteRenderer, Color> entry in originalSpriteColors)
+        {
+            if (entry.Key != null) entry.Key.color = entry.Value;
+        }
+        originalSpriteColors.Clear();
+    }
+
+    public void ClosePopup()
+    {
+        isTourActive = false;
+        Time.timeScale = 1f;
+
+        if (typingCoroutine != null) StopCoroutine(typingCoroutine);
+
+        // Put the clicked object's colors back to normal
+        ClearHighlight();
+
+        dimOverlay.SetActive(false);
+        popupPanel.SetActive(false);
+
+        if (nextButton != null) nextButton.gameObject.SetActive(false);
+        if (prevButton != null) prevButton.gameObject.SetActive(false);
+    }
+
+    // --- Guided Tour Functions ---
+    public void StartGuidedTour()
+    {
+        if (tourElements == null || tourElements.Count == 0) return;
+        isTourActive = true;
+        currentTourIndex = 0;
+        OpenPopup(tourElements[currentTourIndex]);
+    }
+
+    public void NextTourElement()
+    {
+        if (currentTourIndex < tourElements.Count - 1)
+        {
+            currentTourIndex++;
+            OpenPopup(tourElements[currentTourIndex]);
+        }
+        else
+        {
+            ClosePopup();
+        }
+    }
+
+    public void PreviousTourElement()
+    {
+        if (currentTourIndex > 0)
+        {
+            currentTourIndex--;
+            OpenPopup(tourElements[currentTourIndex]);
         }
     }
 
@@ -170,34 +230,9 @@ public class InteractiveTooltipManager : MonoBehaviour
         int index = 0;
         while (index < content.Length)
         {
-            try
-            {
-                descriptionText.text += content[index];
-                index++;
-            }
-            catch (Exception e)
-            {
-                Debug.LogError($"[InteractiveTooltipManager] Exception in TypeText: {e.Message}\n{e.StackTrace}");
-                yield break;
-            }
-
-            yield return new WaitForSeconds(typeSpeed);
-        }
-    }
-
-    public void ClosePopup()
-    {
-        try
-        {
-            if (typingCoroutine != null) StopCoroutine(typingCoroutine);
-
-            dimOverlay.SetActive(false);
-            popupPanel.SetActive(false);
-            if (coneRenderer != null) coneRenderer.enabled = false;
-        }
-        catch (Exception e)
-        {
-            Debug.LogError($"[InteractiveTooltipManager] Exception in ClosePopup: {e.Message}\n{e.StackTrace}");
+            descriptionText.text += content[index];
+            index++;
+            yield return new WaitForSecondsRealtime(typeSpeed);
         }
     }
 }

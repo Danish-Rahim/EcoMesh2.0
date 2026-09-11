@@ -1,8 +1,11 @@
 ScriptsOnlyBuild:
   usedScripts:
     Assembly-CSharp.dll:
+    - InteractiveTooltipManager
     - LiveECGGraph
     - MeshProfile
+    - Readme
+    - RefineryInteractiveElement
     - SpinModel
     - TabNavigationManager
     - UIValueUpdater
@@ -356,6 +359,8 @@ ScriptsOnlyBuild:
       Script: {instanceID: 0}
     - Class: 49
       Script: {instanceID: 0}
+    - Class: 65
+      Script: {instanceID: 0}
     - Class: 72
       Script: {instanceID: 0}
     - Class: 81
@@ -369,9 +374,13 @@ ScriptsOnlyBuild:
     - Class: 108
       Script: {instanceID: 0}
     - Class: 114
+      Script: {fileID: 11500000, guid: fe5ee8f9687074f4087117db14d96788, type: 3}
+    - Class: 114
       Script: {fileID: 11500000, guid: 628f5ea14d0dd87409a068eb0074b7bd, type: 3}
     - Class: 114
       Script: {fileID: 11500000, guid: fc94baf599aa7af4d98b64ec8d62f5c5, type: 3}
+    - Class: 114
+      Script: {fileID: 11500000, guid: d37f2cef971d39b419476cc0ff922f72, type: 3}
     - Class: 114
       Script: {fileID: 11500000, guid: 034faa4d89e29a0458f74be0c2d1c232, type: 3}
     - Class: 114
@@ -520,6 +529,8 @@ ScriptsOnlyBuild:
       Script: {fileID: 11500000, guid: 59f8146938fff824cb5fd77236b75775, type: 3}
     - Class: 115
       Script: {instanceID: 0}
+    - Class: 120
+      Script: {instanceID: 0}
     - Class: 128
       Script: {instanceID: 0}
     - Class: 157
@@ -549,6 +560,12 @@ ScriptsOnlyBuild:
     assemblyName: Unity.RenderPipelines.Universal.Runtime
     namespaceName: UnityEngine.Rendering.Universal
     className: UniversalRenderPipelineAsset
+  - hash:
+      serializedVersion: 2
+      Hash: ca6f0a67fe151a9aba0090c0cd99cb3e
+    assemblyName: Assembly-CSharp
+    namespaceName: 
+    className: UnifiedRefinerySimulator
   - hash:
       serializedVersion: 2
       Hash: 95c8a8c68e664d4868755f06e7c55997
@@ -1643,6 +1660,12 @@ ScriptsOnlyBuild:
     className: TMP_TextSelector_A
   - hash:
       serializedVersion: 2
+      Hash: 37a292732388cff879c4f568a91c8c4c
+    assemblyName: Assembly-CSharp
+    namespaceName: 
+    className: RefineryInteractiveElement
+  - hash:
+      serializedVersion: 2
       Hash: 1deda86fe7ffd8587afcfe68a02d034c
     assemblyName: Assembly-CSharp
     namespaceName: 
@@ -1761,12 +1784,6 @@ ScriptsOnlyBuild:
     assemblyName: Unity.RenderPipelines.Core.Runtime
     namespaceName: UnityEngine.Rendering.UI
     className: DebugUIHandlerButton
-  - hash:
-      serializedVersion: 2
-      Hash: ca6f0a67fe151a9aba0090c0cd99cb3e
-    assemblyName: Assembly-CSharp
-    namespaceName: 
-    className: UnifiedRefinerySimulator
   - hash:
       serializedVersion: 2
       Hash: ff76cf6cf52b4db7b95af6ffadca9288
@@ -2303,6 +2320,12 @@ ScriptsOnlyBuild:
     className: DebugUIHandlerToggle
   - hash:
       serializedVersion: 2
+      Hash: f844b061c7432668622a7c5347cfcd83
+    assemblyName: Assembly-CSharp
+    namespaceName: 
+    className: InteractiveTooltipManager
+  - hash:
+      serializedVersion: 2
       Hash: 1d830bc5cfaaf24301dffea2877f4bea
     assemblyName: Assembly-CSharp
     namespaceName: TMPro.Examples
@@ -2407,4 +2430,4 @@ ScriptsOnlyBuild:
   scenePathNames:
   - Assets/Scenes/SampleScene.unity
   nativeClasses: 
-  playerPath: E:/UnityProjects/Ecomesh2.0 Builds/Windows Build/EcoMesh2.0.exe
+  playerPath: E:/UnityProjects/Ecomesh2.0 Builds/Window Build 28 Aug/EcoMesh2.0.exe
