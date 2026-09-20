@@ -9,15 +9,33 @@ public class UnifiedRefinerySimulator : MonoBehaviour
     // ==========================================
     // REFINERY ENGINE VARIABLES
     // ==========================================
+    [System.Serializable]
     public struct SimulationHistoryRecord
     {
         public string timestamp;
         public bool isSuccess;
+        public string errorReason; // e.g. "Budget Overrun", "Pressure Critical", "Toxic Leak", "None"
+
+        // User Selected Inputs
+        public string materialName;
+        public float bedDepth;
+        public string meshOpening;
+        public float gasFlow;
+        public float inletH2S;
+        public float operatingTemp;
+
+        // Final Calculated Results
         public float efficiency;
         public float dailyCost;
         public float pressureDrop;
         public float outletPpm;
         public string grade;
+    }
+
+    [System.Serializable]
+    private class LogPersistenceWrapper
+    {
+        public List<SimulationHistoryRecord> items = new List<SimulationHistoryRecord>();
     }
 
     private List<SimulationHistoryRecord> simulationHistoryLog = new List<SimulationHistoryRecord>();
@@ -112,7 +130,6 @@ public class UnifiedRefinerySimulator : MonoBehaviour
     public RectTransform graphBoundingBox;
     public RectTransform graphTrackingNode;
 
-    // NEW: Separated Graphs for individual panels
     public LiveECGGraph efficiencyGraph;
     public LiveECGGraph pressureGraph;
     public LiveECGGraph outletH2SGraph;
@@ -123,6 +140,17 @@ public class UnifiedRefinerySimulator : MonoBehaviour
     public TextMeshProUGUI evaluationTitleText;
     public TextMeshProUGUI evaluationReportText;
     public Button restartRunButton;
+
+    [Header("User Shift Logs Modal Window")]
+    public Button btnShowUserLogs;
+    public GameObject userLogsModalPanel;
+    public TextMeshProUGUI userLogsContentText;
+    public Button btnCloseUserLogs;
+
+    [Header("SCADA Left Cards (Live Overviews)")]
+    public TextMeshProUGUI scadaUserProfileLogsText;
+    public TextMeshProUGUI scadaEquipmentMaterialText;
+    public TextMeshProUGUI scadaEquipmentBedDepthText;
 
     [Header("System Application Controls")]
     public Button quitApplicationButton;
@@ -164,7 +192,33 @@ public class UnifiedRefinerySimulator : MonoBehaviour
     {
         try
         {
-            if (mainRunButton != null)
+            runButtonText = mainRunButton.GetComponentInChildren<TextMeshProUGUI>();
+            mainRunButton.onClick.AddListener(OnMainRunButtonClicked);
+        }
+
+        if (fullscreenMainRunButton != null)
+        {
+            fullscreenRunButtonText = fullscreenMainRunButton.GetComponentInChildren<TextMeshProUGUI>();
+            fullscreenMainRunButton.onClick.AddListener(OnMainRunButtonClicked);
+        }
+
+        if (btnGenerateModel != null) btnGenerateModel.onClick.AddListener(OnGenerateHardwareModelConfirmed);
+        if (restartRunButton != null) restartRunButton.onClick.AddListener(ResetSimulationToStandby);
+        if (quitApplicationButton != null) quitApplicationButton.onClick.AddListener(QuitRefinerySimulator);
+        if (maximizeViewportButton != null) maximizeViewportButton.onClick.AddListener(() => SetFullscreenOverlayActive(true));
+        if (closeFullscreenButton != null) closeFullscreenButton.onClick.AddListener(() => SetFullscreenOverlayActive(false));
+        if (btnShowUserLogs != null) btnShowUserLogs.onClick.AddListener(OpenUserLogsModal);
+        if (btnCloseUserLogs != null) btnCloseUserLogs.onClick.AddListener(CloseUserLogsModal);
+        if (userLogsModalPanel != null) userLogsModalPanel.SetActive(false);
+
+        SyncSliders(gasVolumeSlider, fullscreenGasVolumeSlider);
+        SyncSliders(h2sSlider, fullscreenH2SSlider);
+        SyncSliders(temperatureSlider, fullscreenTemperatureSlider);
+
+        if (catalystMeshes != null)
+        {
+            instancedMaterials = new Material[catalystMeshes.Length];
+            for (int i = 0; i < catalystMeshes.Length; i++)
             {
                 runButtonText = mainRunButton.GetComponentInChildren<TextMeshProUGUI>();
                 mainRunButton.onClick.AddListener(OnMainRunButtonClicked);
@@ -210,6 +264,16 @@ public class UnifiedRefinerySimulator : MonoBehaviour
         catch (System.Exception e)
         {
         }
+
+        if (reactorMainBodyRenderer != null) reactorMaterial = reactorMainBodyRenderer.material;
+
+        LoadPersistentLogs();
+        ClearParticles();
+        ResetSimulationToStandby();
+        UpdateHistoryLogDisplayUI();
+        UpdateUnifiedMeshAppearance();
+        UpdateScadaUserProfileCard();
+        UpdateScadaEquipmentCard();
     }
 
     private void Update()
@@ -261,7 +325,16 @@ public class UnifiedRefinerySimulator : MonoBehaviour
 
     private void EvaluateCurrentAlarms()
     {
-        try
+        List<string> activeWarnings = new List<string>();
+
+        if (cachedPressureDrop > 6.5f) activeWarnings.Add($"Pressure Critical ({cachedPressureDrop:F1} kPa)");
+        if (cachedOutletPpm > 5.0f) activeWarnings.Add($"Toxic Leak ({cachedOutletPpm:F1} ppm)");
+        if (cachedDailyCost > 3000f) activeWarnings.Add($"Budget Overflow (â‚¬{cachedDailyCost:F0})");
+
+        string timeStamp = System.DateTime.Now.ToString("HH:mm:ss");
+        bool isInAlarmState = activeWarnings.Count > 0;
+
+        if (isInAlarmState)
         {
             List<string> activeWarnings = new List<string>();
 
@@ -328,39 +401,31 @@ public class UnifiedRefinerySimulator : MonoBehaviour
         {
             perfSummaryTimer += Time.deltaTime;
 
-            if (perfSummaryTimer >= 1.0f)
-            {
-                perfSummaryTimer = 0f;
+            float fluctuation = Random.Range(-0.008f, 0.008f);
 
                 // Micro-fluctuations (+/- 0.8%) for live telemetry jitter
                 float fluctuation = Random.Range(-0.008f, 0.008f);
 
-                float liveEff = Mathf.Clamp(cachedEfficiency * (1f + fluctuation), 0f, 99.99f);
-                float livePress = cachedPressureDrop * (1f + fluctuation);
-                float liveOutlet = cachedOutletPpm * (1f + fluctuation);
-                float liveTemp = (temperatureSlider != null ? temperatureSlider.value : 55f) + Random.Range(-0.3f, 0.3f);
-                float liveLife = cachedServiceLife * (1f + fluctuation);
-                float expectedEff = expectedEfficiencySlider != null ? expectedEfficiencySlider.value : 85f;
+            string lineOutlet = $"Outlet H2S: {liveOutlet:F2} ppm";
+            string lineTemp = $"Temperature: {liveTemp:F1} Â°C";
+            string linePress = $"Pressure Drop: {livePress:F2} kPa";
+            string lineEff = $"Efficiency: {liveEff:F1}%";
+            string lineLife = $"Service Life: {Mathf.Max(0, liveLife):F1} Days";
 
-                string lineOutlet = $"Outlet H2S: {liveOutlet:F2} ppm";
-                string lineTemp = $"Temperature: {liveTemp:F1} °C";
-                string linePress = $"Pressure Drop: {livePress:F2} kPa";
-                string lineEff = $"Efficiency: {liveEff:F1}%";
-                string lineLife = $"Service Life: {Mathf.Max(0, liveLife):F1} Days";
+            if (perfOutletH2SText != null) perfOutletH2SText.text = lineOutlet;
+            if (perfTempText != null) perfTempText.text = lineTemp;
+            if (perfPressureText != null) perfPressureText.text = linePress;
+            if (perfEfficiencyText != null) perfEfficiencyText.text = lineEff;
+            if (perfServiceLifeText != null) perfServiceLifeText.text = lineLife;
 
-                // Update Primary View Fields
-                if (perfOutletH2SText != null) perfOutletH2SText.text = lineOutlet;
-                if (perfTempText != null) perfTempText.text = lineTemp;
-                if (perfPressureText != null) perfPressureText.text = linePress;
-                if (perfEfficiencyText != null) perfEfficiencyText.text = lineEff;
-                if (perfServiceLifeText != null) perfServiceLifeText.text = lineLife;
+            if (altPerfOutletH2SText != null) altPerfOutletH2SText.text = lineOutlet;
+            if (altPerfTempText != null) altPerfTempText.text = lineTemp;
+            if (altPerfPressureText != null) altPerfPressureText.text = linePress;
+            if (altPerfEfficiencyText != null) altPerfEfficiencyText.text = lineEff;
+            if (altPerfServiceLifeText != null) altPerfServiceLifeText.text = lineLife;
 
-                // Update Secondary View Fields
-                if (altPerfOutletH2SText != null) altPerfOutletH2SText.text = lineOutlet;
-                if (altPerfTempText != null) altPerfTempText.text = lineTemp;
-                if (altPerfPressureText != null) altPerfPressureText.text = linePress;
-                if (altPerfEfficiencyText != null) altPerfEfficiencyText.text = lineEff;
-                if (altPerfServiceLifeText != null) altPerfServiceLifeText.text = lineLife;
+            if (graphHeaderEfficiencyText != null) graphHeaderEfficiencyText.text = $"{liveEff:F1}%";
+            if (graphHeaderExpectedEfficiencyText != null) graphHeaderExpectedEfficiencyText.text = $"Exp: {expectedEff:F1}%";
 
                 // Update Graph Header Labels & Standard Safe Values
                 if (graphHeaderEfficiencyText != null) graphHeaderEfficiencyText.text = $"{liveEff:F1}%";
@@ -369,46 +434,33 @@ public class UnifiedRefinerySimulator : MonoBehaviour
                 if (graphHeaderPressureText != null) graphHeaderPressureText.text = $"{livePress:F3} kPa";
                 if (graphHeaderSafePressureText != null) graphHeaderSafePressureText.text = "Safe: < 6.5 kPa";
 
-                if (graphHeaderOutletText != null) graphHeaderOutletText.text = $"{liveOutlet:F2} ppm";
-                if (graphHeaderSafeOutletText != null) graphHeaderSafeOutletText.text = "Safe: < 5.0 ppm";
-
-                if (graphHeaderTempText != null) graphHeaderTempText.text = $"{liveTemp:F1} °C";
-                if (graphHeaderSafeTempText != null) graphHeaderSafeTempText.text = "Std: 55.0 °C";
-            }
-
-        }
-        catch (System.Exception e)
-        {
+            if (graphHeaderTempText != null) graphHeaderTempText.text = $"{liveTemp:F1} Â°C";
+            if (graphHeaderSafeTempText != null) graphHeaderSafeTempText.text = "Std: 55.0 Â°C";
         }
     }
 
     private void ResetPerformanceSummaryUI()
     {
-        try
-        {
-            string defaultOutlet = "Outlet H2S: 0.00 ppm";
-            string defaultTemp = "Temperature: 0.0 °C";
-            string defaultPress = "Pressure Drop: 0.00 kPa";
-            string defaultEff = "Efficiency: 0.0%";
-            string defaultLife = "Service Life: 0.0 Days";
+        string defaultOutlet = "Outlet H2S: 0.00 ppm";
+        string defaultTemp = "Temperature: 0.0 Â°C";
+        string defaultPress = "Pressure Drop: 0.00 kPa";
+        string defaultEff = "Efficiency: 0.0%";
+        string defaultLife = "Service Life: 0.0 Days";
 
-            // Reset Primary View Fields
-            if (perfOutletH2SText != null) perfOutletH2SText.text = defaultOutlet;
-            if (perfTempText != null) perfTempText.text = defaultTemp;
-            if (perfPressureText != null) perfPressureText.text = defaultPress;
-            if (perfEfficiencyText != null) perfEfficiencyText.text = defaultEff;
-            if (perfServiceLifeText != null) perfServiceLifeText.text = defaultLife;
+        if (perfOutletH2SText != null) perfOutletH2SText.text = defaultOutlet;
+        if (perfTempText != null) perfTempText.text = defaultTemp;
+        if (perfPressureText != null) perfPressureText.text = defaultPress;
+        if (perfEfficiencyText != null) perfEfficiencyText.text = defaultEff;
+        if (perfServiceLifeText != null) perfServiceLifeText.text = defaultLife;
 
-            // Reset Secondary View Fields
-            if (altPerfOutletH2SText != null) altPerfOutletH2SText.text = defaultOutlet;
-            if (altPerfTempText != null) altPerfTempText.text = defaultTemp;
-            if (altPerfPressureText != null) altPerfPressureText.text = defaultPress;
-            if (altPerfEfficiencyText != null) altPerfEfficiencyText.text = defaultEff;
-            if (altPerfServiceLifeText != null) altPerfServiceLifeText.text = defaultLife;
+        if (altPerfOutletH2SText != null) altPerfOutletH2SText.text = defaultOutlet;
+        if (altPerfTempText != null) altPerfTempText.text = defaultTemp;
+        if (altPerfPressureText != null) altPerfPressureText.text = defaultPress;
+        if (altPerfEfficiencyText != null) altPerfEfficiencyText.text = defaultEff;
+        if (altPerfServiceLifeText != null) altPerfServiceLifeText.text = defaultLife;
 
-            // Reset Graph Header Labels
-            if (graphHeaderEfficiencyText != null) graphHeaderEfficiencyText.text = "0.0%";
-            if (graphHeaderExpectedEfficiencyText != null) graphHeaderExpectedEfficiencyText.text = "Exp: 0.0%";
+        if (graphHeaderEfficiencyText != null) graphHeaderEfficiencyText.text = "0.0%";
+        if (graphHeaderExpectedEfficiencyText != null) graphHeaderExpectedEfficiencyText.text = "Exp: 0.0%";
 
             if (graphHeaderPressureText != null) graphHeaderPressureText.text = "0.000 kPa";
             if (graphHeaderSafePressureText != null) graphHeaderSafePressureText.text = "Safe: < 6.5 kPa";
@@ -416,13 +468,8 @@ public class UnifiedRefinerySimulator : MonoBehaviour
             if (graphHeaderOutletText != null) graphHeaderOutletText.text = "0.00 ppm";
             if (graphHeaderSafeOutletText != null) graphHeaderSafeOutletText.text = "Safe: < 5.0 ppm";
 
-            if (graphHeaderTempText != null) graphHeaderTempText.text = "0.0 °C";
-            if (graphHeaderSafeTempText != null) graphHeaderSafeTempText.text = "Std: 25.0 °C";
-
-        }
-        catch (System.Exception e)
-        {
-        }
+        if (graphHeaderTempText != null) graphHeaderTempText.text = "0.0 Â°C";
+        if (graphHeaderSafeTempText != null) graphHeaderSafeTempText.text = "Std: 25.0 Â°C";
     }
 
     // ==========================================
@@ -450,25 +497,9 @@ public class UnifiedRefinerySimulator : MonoBehaviour
             if (meshMaterialDropdown != null) cachedMaterialIndex = meshMaterialDropdown.value;
             if (meshOpeningSizeDropdown != null) cachedOpeningSizeIndex = meshOpeningSizeDropdown.value;
 
-            if (discreteBedDepthDropdown != null)
-            {
-                switch (discreteBedDepthDropdown.value)
-                {
-                    case 0: cachedBedDepthL = 0.5f; break;
-                    case 1: cachedBedDepthL = 1.0f; break;
-                    case 2: cachedBedDepthL = 1.5f; break;
-                    case 3: cachedBedDepthL = 2.0f; break;
-                    default: cachedBedDepthL = 1.2f; break;
-                }
-            }
-
-            Update3DModelStructure();
-            UpdateUnifiedMeshAppearance();
-
-        }
-        catch (System.Exception e)
-        {
-        }
+        Update3DModelStructure();
+        UpdateUnifiedMeshAppearance();
+        UpdateScadaEquipmentCard();
     }
 
     private void SetFullscreenOverlayActive(bool isTrue)
@@ -523,11 +554,10 @@ public class UnifiedRefinerySimulator : MonoBehaviour
             if (inletParticles != null && inletParticles.isStopped) inletParticles.Play();
             if (outletParticles != null && outletParticles.isStopped) outletParticles.Play();
 
-            // NEW: Start the individual graphs dynamically scrolling
-            if (efficiencyGraph != null) efficiencyGraph.isSimulationRunning = true;
-            if (pressureGraph != null) pressureGraph.isSimulationRunning = true;
-            if (outletH2SGraph != null) outletH2SGraph.isSimulationRunning = true;
-            if (temperatureGraph != null) temperatureGraph.isSimulationRunning = true;
+        if (efficiencyGraph != null) efficiencyGraph.isSimulationRunning = true;
+        if (pressureGraph != null) pressureGraph.isSimulationRunning = true;
+        if (outletH2SGraph != null) outletH2SGraph.isSimulationRunning = true;
+        if (temperatureGraph != null) temperatureGraph.isSimulationRunning = true;
 
             SetFullscreenOverlayActive(true);
 
@@ -555,69 +585,66 @@ public class UnifiedRefinerySimulator : MonoBehaviour
 
     private void FinishAndEvaluateRun()
     {
-        try
+        currentRunState = SimulationState.CONCLUDED;
+        EvaluateSystemPhysics();
+
+        if (evaluationOverlayPanel != null) evaluationOverlayPanel.transform.SetAsLastSibling();
+
+        string popupTitle = "";
+        string popupMessage = "";
+        string errorReason = "None";
+        bool runSuccess = false;
+        string grade = "F";
+
+        float expectedEff = expectedEfficiencySlider != null ? expectedEfficiencySlider.value : 85f;
+        float expectedCost = estimatedCostSlider != null ? estimatedCostSlider.value : 1500f;
+
+        if (cachedPressureDrop > 6.5f)
         {
-            currentRunState = SimulationState.CONCLUDED;
-            EvaluateSystemPhysics();
-
-            if (evaluationOverlayPanel != null) evaluationOverlayPanel.transform.SetAsLastSibling();
-
-            string popupTitle = "";
-            string popupMessage = "";
-            bool runSuccess = false;
-            string grade = "F";
-
-            float expectedEff = expectedEfficiencySlider != null ? expectedEfficiencySlider.value : 85f;
-            float expectedCost = estimatedCostSlider != null ? estimatedCostSlider.value : 1500f;
-
-            if (cachedPressureDrop > 6.5f)
-            {
-                popupTitle = "<color=red>CRITICAL PLANT DISASTER</color>";
-                popupMessage = $"<b>RUN FAILED</b>\n\nCatastrophic structural failure! Pressure drop hit {cachedPressureDrop:F2} kPa, exceeding casing limits.";
-            }
-            else if (cachedOutletPpm > 5.0f)
-            {
-                popupTitle = "<color=red>CRITICAL PLANT DISASTER</color>";
-                popupMessage = $"<b>RUN FAILED</b>\n\nToxic venting breach! Outlet concentrations hit {cachedOutletPpm:F1} ppm, violating EPA standards.";
-            }
-            else if (cachedDailyCost > 3000f)
-            {
-                popupTitle = "<color=yellow>BUDGET OVERRUN</color>";
-                popupMessage = $"<b>RUN FAILED</b>\n\nSystem operates safely but exceeds daily operating budget.";
-            }
-            else
-            {
-                runSuccess = true;
-
-                float effVariance = Mathf.Abs(cachedEfficiency - expectedEff);
-                float costVariance = Mathf.Abs(cachedDailyCost - expectedCost);
-
-                if (effVariance <= 2.0f && costVariance <= 200f) grade = "A+";
-                else if (effVariance <= 5.0f && costVariance <= 500f) grade = "A";
-                else if (effVariance <= 10.0f && costVariance <= 800f) grade = "B";
-                else grade = "C";
-
-                popupTitle = $"<color=green>SHIFT SUCCESS - GRADE {grade}</color>";
-                popupMessage = $"<b>CONGRATULATIONS, OPERATOR!</b>\n\nReactor operates safely.\n\n<b>Estimation Accuracy:</b>\nEfficiency Variance: {effVariance:F1}%\nCost Variance: €{costVariance:F0}";
-            }
-
-            if (evaluationTitleText != null) evaluationTitleText.text = popupTitle;
-            if (evaluationReportText != null)
-            {
-                evaluationReportText.text = $"{popupMessage}\n\n<b>Final Telemetry Snapshot:</b>\n" +
-                                            $"Efficiency: {cachedEfficiency:F1}%\n" +
-                                            $"Real-time Operational Cost: €{cachedDailyCost:F2}/day";
-            }
-
-            if (evaluationOverlayPanel != null) evaluationOverlayPanel.SetActive(true);
-
-            ArchiveRunToHistoryLog(runSuccess, grade);
-            ClearParticles();
-
+            errorReason = "Pressure Critical";
+            popupTitle = "<color=red>CRITICAL PLANT DISASTER</color>";
+            popupMessage = $"<b>RUN FAILED</b>\n\nCatastrophic structural failure! Pressure drop hit {cachedPressureDrop:F2} kPa, exceeding casing limits.";
         }
         catch (System.Exception e)
         {
+            errorReason = "Toxic Leak";
+            popupTitle = "<color=red>CRITICAL PLANT DISASTER</color>";
+            popupMessage = $"<b>RUN FAILED</b>\n\nToxic venting breach! Outlet concentrations hit {cachedOutletPpm:F1} ppm, violating EPA standards.";
         }
+        else if (cachedDailyCost > 3000f)
+        {
+            errorReason = "Budget Overrun";
+            popupTitle = "<color=yellow>BUDGET OVERRUN</color>";
+            popupMessage = $"<b>RUN FAILED</b>\n\nSystem operates safely but exceeds daily operating budget.";
+        }
+        else
+        {
+            runSuccess = true;
+
+            float effVariance = Mathf.Abs(cachedEfficiency - expectedEff);
+            float costVariance = Mathf.Abs(cachedDailyCost - expectedCost);
+
+            if (effVariance <= 2.0f && costVariance <= 200f) grade = "A+";
+            else if (effVariance <= 5.0f && costVariance <= 500f) grade = "A";
+            else if (effVariance <= 10.0f && costVariance <= 800f) grade = "B";
+            else grade = "C";
+
+            popupTitle = $"<color=green>SHIFT SUCCESS - GRADE {grade}</color>";
+            popupMessage = $"<b>CONGRATULATIONS, OPERATOR!</b>\n\nReactor operates safely.\n\n<b>Estimation Accuracy:</b>\nEfficiency Variance: {effVariance:F1}%\nCost Variance: â‚¬{costVariance:F0}";
+        }
+
+        if (evaluationTitleText != null) evaluationTitleText.text = popupTitle;
+        if (evaluationReportText != null)
+        {
+            evaluationReportText.text = $"{popupMessage}\n\n<b>Final Telemetry Snapshot:</b>\n" +
+                                        $"Efficiency: {cachedEfficiency:F1}%\n" +
+                                        $"Real-time Operational Cost: â‚¬{cachedDailyCost:F2}/day";
+        }
+
+        if (evaluationOverlayPanel != null) evaluationOverlayPanel.SetActive(true);
+
+        ArchiveRunToHistoryLog(runSuccess, grade, errorReason);
+        ClearParticles();
     }
 
     private void ClearParticles()
@@ -626,29 +653,68 @@ public class UnifiedRefinerySimulator : MonoBehaviour
         if (outletParticles != null) outletParticles.Stop();
     }
 
-    private void ArchiveRunToHistoryLog(bool wasSuccessful, string gradeEarned)
+    private void ArchiveRunToHistoryLog(bool wasSuccessful, string gradeEarned, string errorReason)
+    {
+        string matText = (meshMaterialDropdown != null && meshMaterialDropdown.options.Count > meshMaterialDropdown.value) 
+            ? meshMaterialDropdown.options[meshMaterialDropdown.value].text 
+            : "Standard";
+        string openText = (meshOpeningSizeDropdown != null && meshOpeningSizeDropdown.options.Count > meshOpeningSizeDropdown.value) 
+            ? meshOpeningSizeDropdown.options[meshOpeningSizeDropdown.value].text 
+            : "Default";
+
+        SimulationHistoryRecord record = new SimulationHistoryRecord
+        {
+            timestamp = System.DateTime.Now.ToString("HH:mm:ss"),
+            isSuccess = wasSuccessful,
+            errorReason = errorReason,
+            materialName = matText,
+            bedDepth = cachedBedDepthL,
+            meshOpening = openText,
+            gasFlow = gasVolumeSlider != null ? gasVolumeSlider.value : 0f,
+            inletH2S = h2sSlider != null ? h2sSlider.value : 0f,
+            operatingTemp = temperatureSlider != null ? temperatureSlider.value : 0f,
+            efficiency = cachedEfficiency,
+            dailyCost = cachedDailyCost,
+            pressureDrop = cachedPressureDrop,
+            outletPpm = cachedOutletPpm,
+            grade = gradeEarned
+        };
+
+        simulationHistoryLog.Insert(0, record);
+        while (simulationHistoryLog.Count > 10) simulationHistoryLog.RemoveAt(simulationHistoryLog.Count - 1);
+
+        SavePersistentLogs();
+        UpdateHistoryLogDisplayUI();
+        UpdateScadaUserProfileCard();
+    }
+
+    private void SavePersistentLogs()
     {
         try
         {
-            SimulationHistoryRecord record = new SimulationHistoryRecord
-            {
-                timestamp = System.DateTime.Now.ToString("HH:mm:ss"),
-                isSuccess = wasSuccessful,
-                efficiency = cachedEfficiency,
-                dailyCost = cachedDailyCost,
-                pressureDrop = cachedPressureDrop,
-                outletPpm = cachedOutletPpm,
-                grade = gradeEarned
-            };
-
-            simulationHistoryLog.Insert(0, record);
-            while (simulationHistoryLog.Count > 10) simulationHistoryLog.RemoveAt(simulationHistoryLog.Count - 1);
-            UpdateHistoryLogDisplayUI();
-
+            LogPersistenceWrapper wrapper = new LogPersistenceWrapper { items = simulationHistoryLog };
+            string json = JsonUtility.ToJson(wrapper);
+            PlayerPrefs.SetString("EcoMesh_SimHistory_v2", json);
+            PlayerPrefs.Save();
         }
-        catch (System.Exception e)
+        catch (System.Exception) {}
+    }
+
+    private void LoadPersistentLogs()
+    {
+        try
         {
+            if (PlayerPrefs.HasKey("EcoMesh_SimHistory_v2"))
+            {
+                string json = PlayerPrefs.GetString("EcoMesh_SimHistory_v2");
+                LogPersistenceWrapper wrapper = JsonUtility.FromJson<LogPersistenceWrapper>(json);
+                if (wrapper != null && wrapper.items != null)
+                {
+                    simulationHistoryLog = wrapper.items;
+                }
+            }
         }
+        catch (System.Exception) {}
     }
 
     private void UpdateHistoryLogDisplayUI()
@@ -683,6 +749,14 @@ public class UnifiedRefinerySimulator : MonoBehaviour
         }
         catch (System.Exception e)
         {
+            var run = simulationHistoryLog[i];
+            string statusColor = run.isSuccess ? "green" : "red";
+            string statusText = run.isSuccess ? $"SUCCESS (Grade {run.grade})" : "CRITICAL FAILURE";
+
+            logCompiledText += $"[{run.timestamp}] <color={statusColor}><b>{statusText}</b></color> | " +
+                               $"Eff: {run.efficiency.ToString("F1")}% | " +
+                               $"Cost: â‚¬{run.dailyCost.ToString("F0")}/day | " +
+                               $"Press: {run.pressureDrop.ToString("F2")} kPa\n";
         }
     }
 
@@ -714,16 +788,10 @@ public class UnifiedRefinerySimulator : MonoBehaviour
             Update3DModelStructure();
             UpdateUnifiedMeshAppearance();
 
-            // NEW: Stop the graphs when returning to standby mode
-            if (efficiencyGraph != null) efficiencyGraph.isSimulationRunning = false;
-            if (pressureGraph != null) pressureGraph.isSimulationRunning = false;
-            if (outletH2SGraph != null) outletH2SGraph.isSimulationRunning = false;
-            if (temperatureGraph != null) temperatureGraph.isSimulationRunning = false;
-
-        }
-        catch (System.Exception e)
-        {
-        }
+        if (efficiencyGraph != null) efficiencyGraph.isSimulationRunning = false;
+        if (pressureGraph != null) pressureGraph.isSimulationRunning = false;
+        if (outletH2SGraph != null) outletH2SGraph.isSimulationRunning = false;
+        if (temperatureGraph != null) temperatureGraph.isSimulationRunning = false;
     }
 
     private void ToggleStructuralUIInteractability(bool state)
@@ -814,7 +882,53 @@ public class UnifiedRefinerySimulator : MonoBehaviour
     // ==========================================
     private void EvaluateSystemPhysics()
     {
-        try
+        float columnArea = 2.0f;
+        float baseKineticK = 1.29f;
+
+        float gasFlowQ = gasVolumeSlider != null ? gasVolumeSlider.value : 750f;
+        float inletH2S = h2sSlider != null ? h2sSlider.value : 850f;
+        float tempC = temperatureSlider != null ? temperatureSlider.value : 55f;
+        float bedDepthL = cachedBedDepthL;
+
+        float[] matKinetics = { 1.0f, 0.8f, 1.3f, 1.1f };
+        float[] matDurability = { 1.0f, 0.6f, 2.0f, 0.8f };
+        float[] matBaseCost = { 100f, 50f, 400f, 150f };
+
+        float[] openingArea = { 1.4f, 1.0f, 0.7f };
+        float[] openingDrop = { 1.6f, 1.0f, 0.5f };
+
+        int safeMatIndex = Mathf.Clamp(cachedMaterialIndex, 0, 3);
+        int safeOpenIndex = Mathf.Clamp(cachedOpeningSizeIndex, 0, 2);
+
+        float superficialVelocity = (gasFlowQ / 3600f) / columnArea;
+        float gasContactTime = bedDepthL / (superficialVelocity > 0 ? superficialVelocity : 0.0001f);
+
+        cachedPressureDrop = (1.5f * superficialVelocity + 0.5f * Mathf.Pow(superficialVelocity, 2))
+                             * bedDepthL
+                             * openingDrop[safeOpenIndex];
+
+        float tempModifier = 1.0f + ((tempC - 55f) * 0.02f);
+        float adjustedK = baseKineticK * tempModifier * matKinetics[safeMatIndex] * openingArea[safeOpenIndex];
+
+        cachedEfficiency = 100f * (1f - Mathf.Exp(-adjustedK * gasContactTime));
+        cachedEfficiency = Mathf.Clamp(cachedEfficiency, 0f, 99.99f);
+        cachedOutletPpm = inletH2S * (1f - (cachedEfficiency / 100f));
+
+        float blowerPowerKW = (gasFlowQ / 3600f * (cachedPressureDrop * 1000f)) / 0.75f / 1000f;
+        float dailyEnergyCost = blowerPowerKW * 24f * 0.15f;
+        float dailyCapturedH2SKg = (gasFlowQ * inletH2S * 1.2f * 34.08f) / 1e6f / 3600f * 86400f * (cachedEfficiency / 100f);
+        float dailyRegenerationCost = dailyCapturedH2SKg * 1.80f;
+        float structuralDepreciation = matBaseCost[safeMatIndex];
+
+        float rawDailyCost = dailyEnergyCost + dailyRegenerationCost + structuralDepreciation;
+        cachedDailyCost = Mathf.Clamp(rawDailyCost, 0f, 10000f);
+
+        cachedServiceLife = (145f * matDurability[safeMatIndex]) - (dailyCapturedH2SKg * 0.1f);
+
+        UpdateUserInterfaceDisplay(cachedEfficiency, cachedDailyCost, cachedPressureDrop, cachedOutletPpm, cachedServiceLife);
+        UpdateUnifiedMeshAppearance();
+
+        if (inletParticles != null)
         {
             float columnArea = 2.0f;
             float baseKineticK = 1.29f;
@@ -910,30 +1024,31 @@ public class UnifiedRefinerySimulator : MonoBehaviour
             default: return Color.gray;
         }
     }
+
     private void UpdateUnifiedMeshAppearance()
     {
-        try
+        Color baseMatColor = GetMaterialBaseColor(cachedMaterialIndex);
+        Color rustColor = new Color(0.55f, 0.30f, 0.15f, 1f);
+        float saturationFactor = Mathf.Clamp01(meshSaturationAccumulator);
+        Color rustedColor = Color.Lerp(baseMatColor, rustColor, saturationFactor);
+
+        float currentTemp = temperatureSlider != null ? temperatureSlider.value : 35f;
+        float tempNormalized = Mathf.Clamp01(Mathf.InverseLerp(35f, 200f, currentTemp));
+        Color tempInfluencedColor = Color.Lerp(rustedColor, heatedReactorColor, tempNormalized);
+
+        float safetyAlertFactor = 0f;
+        if (currentRunState != SimulationState.STANDBY)
         {
             Color baseMatColor = GetMaterialBaseColor(cachedMaterialIndex);
 
             // Define a natural oxidized rust color (burnt orange/brown)
             Color rustColor = new Color(0.55f, 0.30f, 0.15f, 1f);
 
-            // The accumulator naturally scales from 0 to 1 during the countdown
-            float saturationFactor = Mathf.Clamp01(meshSaturationAccumulator);
+        if (instancedMaterials != null)
+        {
+            Color baselineEmission = new Color(1.0f, 0.75f, 0.2f) * 2.0f;
 
-            // Lerp from the clean base color to the rusted color as time passes
-            Color rustedColor = Color.Lerp(baseMatColor, rustColor, saturationFactor);
-
-            float currentTemp = temperatureSlider != null ? temperatureSlider.value : 35f;
-            float tempNormalized = Mathf.Clamp01(Mathf.InverseLerp(35f, 200f, currentTemp));
-
-            // Apply the temperature glow ON TOP of the currently rusted/clean state
-            Color tempInfluencedColor = Color.Lerp(rustedColor, heatedReactorColor, tempNormalized);
-
-            // NEW: Only apply the Pressure Drop (Volume Load) redness if the simulation is actually running or concluded
-            float safetyAlertFactor = 0f;
-            if (currentRunState != SimulationState.STANDBY)
+            for (int i = 0; i < instancedMaterials.Length; i++)
             {
                 safetyAlertFactor = Mathf.Clamp01(Mathf.InverseLerp(0f, 6.5f, cachedPressureDrop));
             }
@@ -944,11 +1059,11 @@ public class UnifiedRefinerySimulator : MonoBehaviour
             {
                 for (int i = 0; i < instancedMaterials.Length; i++)
                 {
-                    if (instancedMaterials[i] != null)
-                    {
-                        instancedMaterials[i].color = finalInnerMeshColor;
-                        instancedMaterials[i].SetColor("_BaseColor", finalInnerMeshColor);
-                    }
+                    instancedMaterials[i].color = finalInnerMeshColor;
+                    instancedMaterials[i].SetColor("_BaseColor", finalInnerMeshColor);
+
+                    instancedMaterials[i].EnableKeyword("_EMISSION");
+                    instancedMaterials[i].SetColor("_EmissionColor", baselineEmission);
                 }
             }
 
@@ -967,7 +1082,14 @@ public class UnifiedRefinerySimulator : MonoBehaviour
 
     private void UpdateUserInterfaceDisplay(float eff, float cost, float pressDrop, float outPpm, float days)
     {
-        try
+        if (rightSideEfficiencyText != null) rightSideEfficiencyText.text = $"{eff.ToString("F1")}%";
+        if (rightSideCostText != null) rightSideCostText.text = $"â‚¬{cost.ToString("F0")} / day";
+
+        if (detailedPressureDropText != null) detailedPressureDropText.text = $"Pressure Drop: {pressDrop.ToString("F2")} kPa";
+        if (detailedOutletPpmText != null) detailedOutletPpmText.text = $"Outlet H2S: {outPpm.ToString("F2")} ppm";
+        if (detailedServiceLifeText != null) detailedServiceLifeText.text = $"Service Life: {Mathf.Max(0, days).ToString("F0")} Days";
+
+        if (detailedComplianceStatusText != null)
         {
             if (rightSideEfficiencyText != null) rightSideEfficiencyText.text = $"{eff.ToString("F1")}%";
             if (rightSideCostText != null) rightSideCostText.text = $"€{cost.ToString("F0")} / day";
@@ -1018,6 +1140,14 @@ public class UnifiedRefinerySimulator : MonoBehaviour
         catch (System.Exception e)
         {
         }
+
+        float expectedEff = expectedEfficiencySlider != null ? expectedEfficiencySlider.value : 100f;
+        float currentTemp = temperatureSlider != null ? temperatureSlider.value : 55f;
+
+        if (efficiencyGraph != null) efficiencyGraph.UpdateTelemetry(eff, expectedEff);
+        if (pressureGraph != null) pressureGraph.UpdateTelemetry(pressDrop, 6.5f);
+        if (outletH2SGraph != null) outletH2SGraph.UpdateTelemetry(outPpm, 5.0f);
+        if (temperatureGraph != null) temperatureGraph.UpdateTelemetry(currentTemp, 55.0f);
     }
 
     private void QuitRefinerySimulator()
@@ -1053,5 +1183,102 @@ public class UnifiedRefinerySimulator : MonoBehaviour
         catch (System.Exception e)
         {
         }
+    }
+
+    public void OpenUserLogsModal()
+    {
+        if (userLogsModalPanel != null)
+        {
+            userLogsModalPanel.transform.SetAsLastSibling();
+            userLogsModalPanel.SetActive(true);
+        }
+        RenderLogsToModal();
+    }
+
+    public void CloseUserLogsModal()
+    {
+        if (userLogsModalPanel != null)
+        {
+            userLogsModalPanel.SetActive(false);
+        }
+    }
+
+    private void RenderLogsToModal()
+    {
+        if (userLogsContentText == null) return;
+
+        if (simulationHistoryLog.Count == 0)
+        {
+            userLogsContentText.text = "<color=#94a3b8><i>No recorded shift runs found. Run a simulation to compile logs.</i></color>";
+            return;
+        }
+
+        System.Text.StringBuilder sb = new System.Text.StringBuilder();
+
+        for (int i = 0; i < simulationHistoryLog.Count; i++)
+        {
+            var r = simulationHistoryLog[i];
+            string outcomeBadge = r.isSuccess ? "<color=#4ade80><b>SUCCESS</b></color>" : $"<color=#f87171><b>FAILED ({r.errorReason})</b></color>";
+
+            sb.AppendLine($"<b>SHIFT RUN #{i + 1} â€” [{r.timestamp}] â€” {outcomeBadge}</b>");
+            sb.AppendLine($"<color=#cbd5e1><b>Inputs:</b> Mat: {r.materialName} | Bed: {r.bedDepth:F1}m | Mesh: {r.meshOpening} | Flow: {r.gasFlow:F0} mÂ³/h | In H2S: {r.inletH2S:F0} ppm | Temp: {r.operatingTemp:F1}Â°C</color>");
+            sb.AppendLine($"<color=#38bdf8><b>Results:</b> Eff: {r.efficiency:F1}% | Cost: â‚¬{r.dailyCost:F0}/day | Î”P: {r.pressureDrop:F2} kPa | Out H2S: {r.outletPpm:F2} ppm | Grade: {r.grade}</color>");
+            sb.AppendLine("<color=#334155>------------------------------------------------------------------------------------------------------------------</color>");
+        }
+
+        userLogsContentText.text = sb.ToString();
+    }
+
+    // ==========================================
+    // LIVE SCADA LEFT PANEL CARDS
+    // ==========================================
+    private void UpdateScadaEquipmentCard()
+    {
+        try
+        {
+            if (scadaEquipmentMaterialText != null)
+            {
+                string mat = (meshMaterialDropdown != null && meshMaterialDropdown.options.Count > cachedMaterialIndex)
+                    ? meshMaterialDropdown.options[cachedMaterialIndex].text
+                    : "AISI 316L Stainless Steel";
+                scadaEquipmentMaterialText.text = $"Material     {mat}";
+            }
+
+            if (scadaEquipmentBedDepthText != null)
+            {
+                scadaEquipmentBedDepthText.text = $"Bed Depth    {cachedBedDepthL:F2} m";
+            }
+        }
+        catch (System.Exception) {}
+    }
+
+    private void UpdateScadaUserProfileCard()
+    {
+        try
+        {
+            if (scadaUserProfileLogsText == null) return;
+
+            if (simulationHistoryLog.Count == 0)
+            {
+                scadaUserProfileLogsText.text = "<color=#94a3b8><i>No recent shift activity.</i></color>";
+                return;
+            }
+
+            System.Text.StringBuilder sb = new System.Text.StringBuilder();
+
+            int count = Mathf.Min(4, simulationHistoryLog.Count);
+            for (int i = 0; i < count; i++)
+            {
+                var run = simulationHistoryLog[i];
+                string statusText = run.isSuccess 
+                    ? "<color=#22c55e>Simulation Successful</color>" 
+                    : "<color=#ef4444>Simulation Failed</color>";
+
+                sb.AppendLine($"<line-height=150%>{run.timestamp}<pos=50%>{statusText}</line-height>");
+            }
+
+            scadaUserProfileLogsText.text = sb.ToString().TrimEnd();
+        }
+        catch (System.Exception) {}
     }
 }
