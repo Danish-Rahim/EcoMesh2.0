@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+ï»¿using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -9,6 +9,7 @@ public class UnifiedRefinerySimulator : MonoBehaviour
     // ==========================================
     // REFINERY ENGINE VARIABLES
     // ==========================================
+    [System.Serializable]
     public struct SimulationHistoryRecord
     {
         public string timestamp;
@@ -18,9 +19,25 @@ public class UnifiedRefinerySimulator : MonoBehaviour
         public float pressureDrop;
         public float outletPpm;
         public string grade;
+
+        public float inputGasVolume;
+        public float inputH2S;
+        public float inputTemp;
+        public string inputMaterial;
+        public float inputBedDepth;
+        public string inputOpeningSize;
+        public float runDuration;
+        public float serviceLife;
+    }
+
+    [System.Serializable]
+    private class HistoryWrapper
+    {
+        public List<SimulationHistoryRecord> historyList;
     }
 
     private List<SimulationHistoryRecord> simulationHistoryLog = new List<SimulationHistoryRecord>();
+    private const string HISTORY_SAVE_KEY = "Refinery_Simulation_History_V1";
 
     static private float runtimeCountdownClockStatic = 20.0f;
     private float runtimeCountdownClock = runtimeCountdownClockStatic;
@@ -108,11 +125,11 @@ public class UnifiedRefinerySimulator : MonoBehaviour
     private float perfSummaryTimer = 1.0f;
 
     [Header("Historical Reports & Graphing")]
-    public TextMeshProUGUI historyLogDisplayTexbox;
+    public TextMeshProUGUI[] historyRowTexts;
     public RectTransform graphBoundingBox;
     public RectTransform graphTrackingNode;
 
-    // NEW: Separated Graphs for individual panels
+    // Separated Graphs for individual panels
     public LiveECGGraph efficiencyGraph;
     public LiveECGGraph pressureGraph;
     public LiveECGGraph outletH2SGraph;
@@ -123,6 +140,7 @@ public class UnifiedRefinerySimulator : MonoBehaviour
     public TextMeshProUGUI evaluationTitleText;
     public TextMeshProUGUI evaluationReportText;
     public Button restartRunButton;
+    public Button closeEvaluationPopupButton;
 
     [Header("System Application Controls")]
     public Button quitApplicationButton;
@@ -152,6 +170,7 @@ public class UnifiedRefinerySimulator : MonoBehaviour
     private float cachedPressureDrop = 0f;
     private float cachedOutletPpm = 0f;
     private float cachedServiceLife = 0f;
+    private bool isStartIteration = false;
 
     private int cachedMaterialIndex = 0;
     private float cachedBedDepthL = 1.2f;
@@ -178,6 +197,7 @@ public class UnifiedRefinerySimulator : MonoBehaviour
 
             if (btnGenerateModel != null) btnGenerateModel.onClick.AddListener(OnGenerateHardwareModelConfirmed);
             if (restartRunButton != null) restartRunButton.onClick.AddListener(ResetSimulationToStandby);
+            if (closeEvaluationPopupButton != null) closeEvaluationPopupButton.onClick.AddListener(CloseEvaluationPopup);
             if (quitApplicationButton != null) quitApplicationButton.onClick.AddListener(QuitRefinerySimulator);
             if (maximizeViewportButton != null) maximizeViewportButton.onClick.AddListener(() => SetFullscreenOverlayActive(true));
             if (closeFullscreenButton != null) closeFullscreenButton.onClick.AddListener(() => SetFullscreenOverlayActive(false));
@@ -200,15 +220,16 @@ public class UnifiedRefinerySimulator : MonoBehaviour
             }
 
             if (reactorMainBodyRenderer != null) reactorMaterial = reactorMainBodyRenderer.material;
-
+            isStartIteration = true;
             ClearParticles();
+            LoadSimulationHistoryFromStorage();
             ResetSimulationToStandby();
             UpdateHistoryLogDisplayUI();
             UpdateUnifiedMeshAppearance();
-
         }
         catch (System.Exception e)
         {
+            Debug.LogError($"[Start] Error: {e.Message}");
         }
     }
 
@@ -231,10 +252,197 @@ public class UnifiedRefinerySimulator : MonoBehaviour
             }
 
             HandleZoom();
-
+            CheckHistoryLogClicks();
         }
         catch (System.Exception e)
         {
+            Debug.LogError($"[Update] Error: {e.Message}");
+        }
+    }
+
+    // ==========================================
+    // HISTORY LOGIC & PERSISTENCE
+    // ==========================================
+    private void LoadSimulationHistoryFromStorage()
+    {
+        try
+        {
+            if (PlayerPrefs.HasKey(HISTORY_SAVE_KEY))
+            {
+                string json = PlayerPrefs.GetString(HISTORY_SAVE_KEY);
+                HistoryWrapper wrapper = JsonUtility.FromJson<HistoryWrapper>(json);
+                if (wrapper != null && wrapper.historyList != null)
+                {
+                    simulationHistoryLog = wrapper.historyList;
+                }
+            }
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError($"[LoadHistory] Error: {e.Message}");
+        }
+    }
+
+    private void SaveSimulationHistoryToStorage()
+    {
+        try
+        {
+            HistoryWrapper wrapper = new HistoryWrapper { historyList = this.simulationHistoryLog };
+            string json = JsonUtility.ToJson(wrapper);
+            PlayerPrefs.SetString(HISTORY_SAVE_KEY, json);
+            PlayerPrefs.Save();
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError($"[SaveHistory] Error: {e.Message}");
+        }
+    }
+
+    private void CheckHistoryLogClicks()
+    {
+        try
+        {
+            if (Input.GetMouseButtonDown(0) && historyRowTexts != null)
+            {
+                for (int i = 0; i < historyRowTexts.Length; i++)
+                {
+                    TextMeshProUGUI rowText = historyRowTexts[i];
+                    if (rowText != null && rowText.gameObject.activeInHierarchy)
+                    {
+                        int linkIndex = TMP_TextUtilities.FindIntersectingLink(rowText, Input.mousePosition, null);
+                        if (linkIndex != -1)
+                        {
+                            TMP_LinkInfo linkInfo = rowText.textInfo.linkInfo[linkIndex];
+                            if (int.TryParse(linkInfo.GetLinkID(), out int historyIndex))
+                            {
+                                OpenHistoryDetailPopup(historyIndex);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError($"[CheckHistoryClicks] Error: {e.Message}");
+        }
+    }
+
+    private void OpenHistoryDetailPopup(int index)
+    {
+        try
+        {
+            if (index < 0 || index >= simulationHistoryLog.Count) return;
+
+            SimulationHistoryRecord record = simulationHistoryLog[index];
+
+            if (evaluationOverlayPanel != null) evaluationOverlayPanel.transform.SetAsLastSibling();
+
+            string statusText = record.isSuccess ? "<color=green>SUCCESS</color>" : "<color=red>FAILED</color>";
+            string popupTitle = $"<color=white>HISTORICAL RUN: {record.timestamp}</color>";
+
+            string popupMessage = $"<b>RUN STATUS:</b> {statusText}\n\n" +
+                                  $"<b>OPERATOR SELECTIONS:</b>\n" +
+                                  $"Inlet Gas Flow: {record.inputGasVolume:F0} Nm3/h\n" +
+                                  $"H2S Concentration: {record.inputH2S:F0} ppm\n" +
+                                  $"Temperature: {record.inputTemp:F1} Â°C\n" +
+                                  $"Hardware Material: {record.inputMaterial}\n" +
+                                  $"Bed Depth: {record.inputBedDepth:F2} m\n" +
+                                  $"Opening Size: {record.inputOpeningSize}\n\n" +
+                                  $"<b>SIMULATION RESULTS ({record.runDuration:F0}s shift):</b>\n" +
+                                  $"H2S Removal Efficiency: {record.efficiency:F2}%\n" +
+                                  $"Operational Cost: â‚¬{record.dailyCost:F2}/day\n" +
+                                  $"Pressure Drop: {record.pressureDrop:F2} kPa\n" +
+                                  $"Outlet Toxic Exhaust: {record.outletPpm:F2} ppm\n" +
+                                  $"Est. Material Service Life: {record.serviceLife:F0} Days";
+
+            if (evaluationTitleText != null) evaluationTitleText.text = popupTitle;
+            if (evaluationReportText != null) evaluationReportText.text = popupMessage;
+
+            if (restartRunButton != null) restartRunButton.gameObject.SetActive(false);
+
+            if (evaluationOverlayPanel != null) evaluationOverlayPanel.SetActive(true);
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError($"[OpenHistoryPopup] Error: {e.Message}");
+        }
+    }
+
+    private void CloseEvaluationPopup()
+    {
+        if (evaluationOverlayPanel != null) evaluationOverlayPanel.SetActive(false);
+        // Resets the simulation state, run buttons, graphs, and UI elements to standby
+        ResetSimulationToStandby();
+    }
+
+    private void ArchiveRunToHistoryLog(bool wasSuccessful, string gradeEarned)
+    {
+        try
+        {
+            string matName = meshMaterialDropdown != null ? meshMaterialDropdown.options[meshMaterialDropdown.value].text : "Unknown";
+            string openSize = meshOpeningSizeDropdown != null ? meshOpeningSizeDropdown.options[meshOpeningSizeDropdown.value].text : "Unknown";
+
+            SimulationHistoryRecord record = new SimulationHistoryRecord
+            {
+                timestamp = System.DateTime.Now.ToString("dd/MM - HH:mm:ss"),
+                isSuccess = wasSuccessful,
+                efficiency = cachedEfficiency,
+                dailyCost = cachedDailyCost,
+                pressureDrop = cachedPressureDrop,
+                outletPpm = cachedOutletPpm,
+                grade = gradeEarned,
+
+                inputGasVolume = gasVolumeSlider != null ? gasVolumeSlider.value : 0f,
+                inputH2S = h2sSlider != null ? h2sSlider.value : 0f,
+                inputTemp = temperatureSlider != null ? temperatureSlider.value : 0f,
+                inputMaterial = matName,
+                inputBedDepth = cachedBedDepthL,
+                inputOpeningSize = openSize,
+                runDuration = runtimeCountdownClockStatic,
+                serviceLife = cachedServiceLife
+            };
+
+            simulationHistoryLog.Insert(0, record);
+            while (simulationHistoryLog.Count > 10) simulationHistoryLog.RemoveAt(simulationHistoryLog.Count - 1);
+
+            SaveSimulationHistoryToStorage();
+            UpdateHistoryLogDisplayUI();
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError($"[ArchiveRun] Error: {e.Message}");
+        }
+    }
+
+    private void UpdateHistoryLogDisplayUI()
+    {
+        try
+        {
+            if (historyRowTexts == null || historyRowTexts.Length == 0) return;
+
+            for (int i = 0; i < historyRowTexts.Length; i++)
+            {
+                if (historyRowTexts[i] == null) continue;
+
+                if (i < simulationHistoryLog.Count)
+                {
+                    var run = simulationHistoryLog[i];
+                    string statusColor = run.isSuccess ? "#00FF00" : "#FF4444";
+                    string statusText = run.isSuccess ? "Successful" : "Unsuccessful";
+
+                    historyRowTexts[i].text = $"<link=\"{i}\">[{run.timestamp}] - <color={statusColor}>{statusText}</color></link>";
+                }
+                else
+                {
+                    historyRowTexts[i].text = i == 0 ? "<i>No operational simulation runs logged yet.</i>" : "";
+                }
+            }
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError($"[UpdateHistoryUI] Error: {e.Message}");
         }
     }
 
@@ -252,7 +460,6 @@ public class UnifiedRefinerySimulator : MonoBehaviour
                 alarmUpdateTimer = 0f;
                 EvaluateCurrentAlarms();
             }
-
         }
         catch (System.Exception e)
         {
@@ -267,7 +474,7 @@ public class UnifiedRefinerySimulator : MonoBehaviour
 
             if (cachedPressureDrop > 6.5f) activeWarnings.Add($"Pressure Critical ({cachedPressureDrop:F1} kPa)");
             if (cachedOutletPpm > 5.0f) activeWarnings.Add($"Toxic Leak ({cachedOutletPpm:F1} ppm)");
-            if (cachedDailyCost > 3000f) activeWarnings.Add($"Budget Overflow (€{cachedDailyCost:F0})");
+            if (cachedDailyCost > 3000f) activeWarnings.Add($"Budget Overflow (â‚¬{cachedDailyCost:F0})");
 
             string timeStamp = System.DateTime.Now.ToString("HH:mm:ss");
             bool isInAlarmState = activeWarnings.Count > 0;
@@ -285,7 +492,6 @@ public class UnifiedRefinerySimulator : MonoBehaviour
             }
 
             wasInAlarmState = isInAlarmState;
-
         }
         catch (System.Exception e)
         {
@@ -299,7 +505,6 @@ public class UnifiedRefinerySimulator : MonoBehaviour
             alarmLogs.Insert(0, message);
             if (alarmLogs.Count > 3) alarmLogs.RemoveAt(alarmLogs.Count - 1);
             if (alarmLogText != null) alarmLogText.text = string.Join("\n", alarmLogs);
-
         }
         catch (System.Exception e)
         {
@@ -312,7 +517,6 @@ public class UnifiedRefinerySimulator : MonoBehaviour
         {
             if (alarmHeaderStatusText == null) return;
             alarmHeaderStatusText.text = hasActiveAlarm ? "<color=red>ACTIVE WARNINGS</color>" : "<color=green>NO ACTIVE ALARMS</color>";
-
         }
         catch (System.Exception e)
         {
@@ -332,7 +536,6 @@ public class UnifiedRefinerySimulator : MonoBehaviour
             {
                 perfSummaryTimer = 0f;
 
-                // Micro-fluctuations (+/- 0.8%) for live telemetry jitter
                 float fluctuation = Random.Range(-0.008f, 0.008f);
 
                 float liveEff = Mathf.Clamp(cachedEfficiency * (1f + fluctuation), 0f, 99.99f);
@@ -343,26 +546,23 @@ public class UnifiedRefinerySimulator : MonoBehaviour
                 float expectedEff = expectedEfficiencySlider != null ? expectedEfficiencySlider.value : 85f;
 
                 string lineOutlet = $"Outlet H2S: {liveOutlet:F2} ppm";
-                string lineTemp = $"Temperature: {liveTemp:F1} °C";
+                string lineTemp = $"Temperature: {liveTemp:F1} Â°C";
                 string linePress = $"Pressure Drop: {livePress:F2} kPa";
                 string lineEff = $"Efficiency: {liveEff:F1}%";
                 string lineLife = $"Service Life: {Mathf.Max(0, liveLife):F1} Days";
 
-                // Update Primary View Fields
                 if (perfOutletH2SText != null) perfOutletH2SText.text = lineOutlet;
                 if (perfTempText != null) perfTempText.text = lineTemp;
                 if (perfPressureText != null) perfPressureText.text = linePress;
                 if (perfEfficiencyText != null) perfEfficiencyText.text = lineEff;
                 if (perfServiceLifeText != null) perfServiceLifeText.text = lineLife;
 
-                // Update Secondary View Fields
                 if (altPerfOutletH2SText != null) altPerfOutletH2SText.text = lineOutlet;
                 if (altPerfTempText != null) altPerfTempText.text = lineTemp;
                 if (altPerfPressureText != null) altPerfPressureText.text = linePress;
                 if (altPerfEfficiencyText != null) altPerfEfficiencyText.text = lineEff;
                 if (altPerfServiceLifeText != null) altPerfServiceLifeText.text = lineLife;
 
-                // Update Graph Header Labels & Standard Safe Values
                 if (graphHeaderEfficiencyText != null) graphHeaderEfficiencyText.text = $"{liveEff:F1}%";
                 if (graphHeaderExpectedEfficiencyText != null) graphHeaderExpectedEfficiencyText.text = $"Exp: {expectedEff:F1}%";
 
@@ -372,10 +572,9 @@ public class UnifiedRefinerySimulator : MonoBehaviour
                 if (graphHeaderOutletText != null) graphHeaderOutletText.text = $"{liveOutlet:F2} ppm";
                 if (graphHeaderSafeOutletText != null) graphHeaderSafeOutletText.text = "Safe: < 5.0 ppm";
 
-                if (graphHeaderTempText != null) graphHeaderTempText.text = $"{liveTemp:F1} °C";
-                if (graphHeaderSafeTempText != null) graphHeaderSafeTempText.text = "Std: 55.0 °C";
+                if (graphHeaderTempText != null) graphHeaderTempText.text = $"{liveTemp:F1} Â°C";
+                if (graphHeaderSafeTempText != null) graphHeaderSafeTempText.text = "Std: 55.0 Â°C";
             }
-
         }
         catch (System.Exception e)
         {
@@ -387,26 +586,23 @@ public class UnifiedRefinerySimulator : MonoBehaviour
         try
         {
             string defaultOutlet = "Outlet H2S: 0.00 ppm";
-            string defaultTemp = "Temperature: 0.0 °C";
+            string defaultTemp = "Temperature: 0.0 Â°C";
             string defaultPress = "Pressure Drop: 0.00 kPa";
             string defaultEff = "Efficiency: 0.0%";
             string defaultLife = "Service Life: 0.0 Days";
 
-            // Reset Primary View Fields
             if (perfOutletH2SText != null) perfOutletH2SText.text = defaultOutlet;
             if (perfTempText != null) perfTempText.text = defaultTemp;
             if (perfPressureText != null) perfPressureText.text = defaultPress;
             if (perfEfficiencyText != null) perfEfficiencyText.text = defaultEff;
             if (perfServiceLifeText != null) perfServiceLifeText.text = defaultLife;
 
-            // Reset Secondary View Fields
             if (altPerfOutletH2SText != null) altPerfOutletH2SText.text = defaultOutlet;
             if (altPerfTempText != null) altPerfTempText.text = defaultTemp;
             if (altPerfPressureText != null) altPerfPressureText.text = defaultPress;
             if (altPerfEfficiencyText != null) altPerfEfficiencyText.text = defaultEff;
             if (altPerfServiceLifeText != null) altPerfServiceLifeText.text = defaultLife;
 
-            // Reset Graph Header Labels
             if (graphHeaderEfficiencyText != null) graphHeaderEfficiencyText.text = "0.0%";
             if (graphHeaderExpectedEfficiencyText != null) graphHeaderExpectedEfficiencyText.text = "Exp: 0.0%";
 
@@ -416,9 +612,8 @@ public class UnifiedRefinerySimulator : MonoBehaviour
             if (graphHeaderOutletText != null) graphHeaderOutletText.text = "0.00 ppm";
             if (graphHeaderSafeOutletText != null) graphHeaderSafeOutletText.text = "Safe: < 5.0 ppm";
 
-            if (graphHeaderTempText != null) graphHeaderTempText.text = "0.0 °C";
-            if (graphHeaderSafeTempText != null) graphHeaderSafeTempText.text = "Std: 25.0 °C";
-
+            if (graphHeaderTempText != null) graphHeaderTempText.text = "0.0 Â°C";
+            if (graphHeaderSafeTempText != null) graphHeaderSafeTempText.text = "Std: 25.0 Â°C";
         }
         catch (System.Exception e)
         {
@@ -436,7 +631,6 @@ public class UnifiedRefinerySimulator : MonoBehaviour
             fullScreenSlider.value = mainSlider.value;
             mainSlider.onValueChanged.AddListener((val) => { if (fullScreenSlider.value != val) fullScreenSlider.value = val; });
             fullScreenSlider.onValueChanged.AddListener((val) => { if (mainSlider.value != val) mainSlider.value = val; });
-
         }
         catch (System.Exception e)
         {
@@ -464,7 +658,6 @@ public class UnifiedRefinerySimulator : MonoBehaviour
 
             Update3DModelStructure();
             UpdateUnifiedMeshAppearance();
-
         }
         catch (System.Exception e)
         {
@@ -480,7 +673,6 @@ public class UnifiedRefinerySimulator : MonoBehaviour
     {
         try
         {
-
             if (Input.GetMouseButtonDown(0))
             {
                 Ray ray = Camera.main.ScreenPointToRay(Input.mousePosition);
@@ -489,7 +681,6 @@ public class UnifiedRefinerySimulator : MonoBehaviour
                     Debug.Log($"[System Diagnostics] Operator clicked on: {hit.transform.name}");
                 }
             }
-
         }
         catch (System.Exception e)
         {
@@ -498,7 +689,10 @@ public class UnifiedRefinerySimulator : MonoBehaviour
 
     private void OnMainRunButtonClicked()
     {
-        if (currentRunState == SimulationState.STANDBY) StartActiveSimulationRun();
+        if (currentRunState == SimulationState.STANDBY || currentRunState == SimulationState.CONCLUDED)
+        {
+            StartActiveSimulationRun();
+        }
     }
 
     private void StartActiveSimulationRun()
@@ -523,14 +717,13 @@ public class UnifiedRefinerySimulator : MonoBehaviour
             if (inletParticles != null && inletParticles.isStopped) inletParticles.Play();
             if (outletParticles != null && outletParticles.isStopped) outletParticles.Play();
 
-            // NEW: Start the individual graphs dynamically scrolling
+            // Enable graphs when starting
             if (efficiencyGraph != null) efficiencyGraph.isSimulationRunning = true;
             if (pressureGraph != null) pressureGraph.isSimulationRunning = true;
             if (outletH2SGraph != null) outletH2SGraph.isSimulationRunning = true;
             if (temperatureGraph != null) temperatureGraph.isSimulationRunning = true;
 
             SetFullscreenOverlayActive(true);
-
         }
         catch (System.Exception e)
         {
@@ -544,9 +737,14 @@ public class UnifiedRefinerySimulator : MonoBehaviour
             runtimeCountdownClock -= Time.deltaTime;
             meshSaturationAccumulator += Time.deltaTime / runtimeCountdownClockStatic;
 
-            if (runtimeCountdownClock <= 0.0f) FinishAndEvaluateRun();
-            else SyncRunButtonState($"SIMULATING ({runtimeCountdownClock.ToString("F0")}s)", true);
-
+            if (runtimeCountdownClock <= 0.0f)
+            {
+                FinishAndEvaluateRun();
+            }
+            else
+            {
+                SyncRunButtonState($"SIMULATING ({runtimeCountdownClock.ToString("F0")}s)", true);
+            }
         }
         catch (System.Exception e)
         {
@@ -559,6 +757,16 @@ public class UnifiedRefinerySimulator : MonoBehaviour
         {
             currentRunState = SimulationState.CONCLUDED;
             EvaluateSystemPhysics();
+
+            // Stop all graphs when simulation ends
+            if (efficiencyGraph != null) efficiencyGraph.isSimulationRunning = false;
+            if (pressureGraph != null) pressureGraph.isSimulationRunning = false;
+            if (outletH2SGraph != null) outletH2SGraph.isSimulationRunning = false;
+            if (temperatureGraph != null) temperatureGraph.isSimulationRunning = false;
+
+            // Restore Run Button to original state and make it interactable again
+            SyncRunButtonState("ENGAGE REACTOR", true);
+            ToggleStructuralUIInteractability(true);
 
             if (evaluationOverlayPanel != null) evaluationOverlayPanel.transform.SetAsLastSibling();
 
@@ -588,7 +796,6 @@ public class UnifiedRefinerySimulator : MonoBehaviour
             else
             {
                 runSuccess = true;
-
                 float effVariance = Mathf.Abs(cachedEfficiency - expectedEff);
                 float costVariance = Mathf.Abs(cachedDailyCost - expectedCost);
 
@@ -598,7 +805,7 @@ public class UnifiedRefinerySimulator : MonoBehaviour
                 else grade = "C";
 
                 popupTitle = $"<color=green>SHIFT SUCCESS - GRADE {grade}</color>";
-                popupMessage = $"<b>CONGRATULATIONS, OPERATOR!</b>\n\nReactor operates safely.\n\n<b>Estimation Accuracy:</b>\nEfficiency Variance: {effVariance:F1}%\nCost Variance: €{costVariance:F0}";
+                popupMessage = $"<b>CONGRATULATIONS, OPERATOR!</b>\n\nReactor operates safely.\n\n<b>Estimation Accuracy:</b>\nEfficiency Variance: {effVariance:F1}%\nCost Variance: â‚¬{costVariance:F0}";
             }
 
             if (evaluationTitleText != null) evaluationTitleText.text = popupTitle;
@@ -606,17 +813,18 @@ public class UnifiedRefinerySimulator : MonoBehaviour
             {
                 evaluationReportText.text = $"{popupMessage}\n\n<b>Final Telemetry Snapshot:</b>\n" +
                                             $"Efficiency: {cachedEfficiency:F1}%\n" +
-                                            $"Real-time Operational Cost: €{cachedDailyCost:F2}/day";
+                                            $"Real-time Operational Cost: â‚¬{cachedDailyCost:F2}/day";
             }
 
+            if (restartRunButton != null) restartRunButton.gameObject.SetActive(true);
             if (evaluationOverlayPanel != null) evaluationOverlayPanel.SetActive(true);
 
             ArchiveRunToHistoryLog(runSuccess, grade);
             ClearParticles();
-
         }
         catch (System.Exception e)
         {
+            Debug.LogError($"[FinishAndEvaluateRun] Error: {e.Message}");
         }
     }
 
@@ -624,66 +832,6 @@ public class UnifiedRefinerySimulator : MonoBehaviour
     {
         if (inletParticles != null) inletParticles.Stop();
         if (outletParticles != null) outletParticles.Stop();
-    }
-
-    private void ArchiveRunToHistoryLog(bool wasSuccessful, string gradeEarned)
-    {
-        try
-        {
-            SimulationHistoryRecord record = new SimulationHistoryRecord
-            {
-                timestamp = System.DateTime.Now.ToString("HH:mm:ss"),
-                isSuccess = wasSuccessful,
-                efficiency = cachedEfficiency,
-                dailyCost = cachedDailyCost,
-                pressureDrop = cachedPressureDrop,
-                outletPpm = cachedOutletPpm,
-                grade = gradeEarned
-            };
-
-            simulationHistoryLog.Insert(0, record);
-            while (simulationHistoryLog.Count > 10) simulationHistoryLog.RemoveAt(simulationHistoryLog.Count - 1);
-            UpdateHistoryLogDisplayUI();
-
-        }
-        catch (System.Exception e)
-        {
-        }
-    }
-
-    private void UpdateHistoryLogDisplayUI()
-    {
-        try
-        {
-            if (historyLogDisplayTexbox == null) return;
-
-            if (simulationHistoryLog.Count == 0)
-            {
-                historyLogDisplayTexbox.text = "<i>No operational simulation run history compiled for this current workspace session yet.</i>";
-                return;
-            }
-
-            string logCompiledText = "<b>HISTORICAL REFINERY SHIFT PERFORMANCE LOGS (LAST 10 RUNS)</b>\n";
-            logCompiledText += "---------------------------------------------------------------------------------\n";
-
-            for (int i = 0; i < simulationHistoryLog.Count; i++)
-            {
-                var run = simulationHistoryLog[i];
-                string statusColor = run.isSuccess ? "green" : "red";
-                string statusText = run.isSuccess ? $"SUCCESS (Grade {run.grade})" : "CRITICAL FAILURE";
-
-                logCompiledText += $"[{run.timestamp}] <color={statusColor}><b>{statusText}</b></color> | " +
-                                   $"Eff: {run.efficiency.ToString("F1")}% | " +
-                                   $"Cost: €{run.dailyCost.ToString("F0")}/day | " +
-                                   $"Press: {run.pressureDrop.ToString("F2")} kPa\n";
-            }
-
-            historyLogDisplayTexbox.text = logCompiledText;
-
-        }
-        catch (System.Exception e)
-        {
-        }
     }
 
     private void ResetSimulationToStandby()
@@ -703,7 +851,11 @@ public class UnifiedRefinerySimulator : MonoBehaviour
             ResetPerformanceSummaryUI();
 
             if (evaluationOverlayPanel != null) evaluationOverlayPanel.SetActive(false);
-            if (fullscreenOverlayPanel != null) fullscreenOverlayPanel.SetActive(false);
+            if (fullscreenOverlayPanel != null && isStartIteration == true)
+            { 
+                fullscreenOverlayPanel.SetActive(false);
+                isStartIteration = false;
+            }
 
             ToggleStructuralUIInteractability(true);
             ToggleStreamUIInteractability(true);
@@ -714,12 +866,10 @@ public class UnifiedRefinerySimulator : MonoBehaviour
             Update3DModelStructure();
             UpdateUnifiedMeshAppearance();
 
-            // NEW: Stop the graphs when returning to standby mode
             if (efficiencyGraph != null) efficiencyGraph.isSimulationRunning = false;
             if (pressureGraph != null) pressureGraph.isSimulationRunning = false;
             if (outletH2SGraph != null) outletH2SGraph.isSimulationRunning = false;
             if (temperatureGraph != null) temperatureGraph.isSimulationRunning = false;
-
         }
         catch (System.Exception e)
         {
@@ -746,7 +896,6 @@ public class UnifiedRefinerySimulator : MonoBehaviour
 
             if (expectedEfficiencySlider != null) expectedEfficiencySlider.interactable = state;
             if (estimatedCostSlider != null) estimatedCostSlider.interactable = state;
-
         }
         catch (System.Exception e)
         {
@@ -758,7 +907,6 @@ public class UnifiedRefinerySimulator : MonoBehaviour
         if (gasVolumeSlider != null) gasVolumeSlider.interactable = state;
         if (h2sSlider != null) h2sSlider.interactable = state;
         if (temperatureSlider != null) temperatureSlider.interactable = state;
-
         if (fullscreenGasVolumeSlider != null) fullscreenGasVolumeSlider.interactable = state;
         if (fullscreenH2SSlider != null) fullscreenH2SSlider.interactable = state;
         if (fullscreenTemperatureSlider != null) fullscreenTemperatureSlider.interactable = state;
@@ -768,7 +916,6 @@ public class UnifiedRefinerySimulator : MonoBehaviour
     {
         if (runButtonText != null) runButtonText.text = text;
         if (fullscreenRunButtonText != null) fullscreenRunButtonText.text = text;
-
         if (mainRunButton != null) mainRunButton.interactable = isInteractable;
         if (fullscreenMainRunButton != null) fullscreenMainRunButton.interactable = isInteractable;
     }
@@ -801,8 +948,6 @@ public class UnifiedRefinerySimulator : MonoBehaviour
                     }
                 }
             }
-
-
         }
         catch (System.Exception e)
         {
@@ -854,15 +999,29 @@ public class UnifiedRefinerySimulator : MonoBehaviour
             float dailyRegenerationCost = dailyCapturedH2SKg * 1.80f;
             float structuralDepreciation = matBaseCost[safeMatIndex];
 
-            // NEW: Calculate the raw cost first
             float rawDailyCost = dailyEnergyCost + dailyRegenerationCost + structuralDepreciation;
-
-            // NEW: Clamp the maximum cost at 10,000 Euros to prevent runaway values at extreme slider limits
             cachedDailyCost = Mathf.Clamp(rawDailyCost, 0f, 10000f);
-
-            //cachedDailyCost = dailyEnergyCost + dailyRegenerationCost + structuralDepreciation;
-
             cachedServiceLife = (145f * matDurability[safeMatIndex]) - (dailyCapturedH2SKg * 0.1f);
+
+            // Live Output Card real-time telemetry calculation
+            float liveDisplayOutlet = cachedOutletPpm;
+            float liveDisplayTemp = tempC;
+            float liveDisplayPressure = cachedPressureDrop;
+            float liveDisplayEfficiency = cachedEfficiency;
+
+            if (currentRunState == SimulationState.RUNNING)
+            {
+                float fluctuation = Random.Range(-0.008f, 0.008f);
+                liveDisplayEfficiency = Mathf.Clamp(cachedEfficiency * (1f + fluctuation), 0f, 99.99f);
+                liveDisplayPressure = cachedPressureDrop * (1f + fluctuation);
+                liveDisplayOutlet = cachedOutletPpm * (1f + fluctuation);
+                liveDisplayTemp = tempC + Random.Range(-0.3f, 0.3f);
+            }
+
+            if (perfOutletH2SText != null) perfOutletH2SText.text = $"Outlet H2S: {liveDisplayOutlet:F2} ppm";
+            if (perfTempText != null) perfTempText.text = $"Temperature: {liveDisplayTemp:F1} Â°C";
+            if (perfPressureText != null) perfPressureText.text = $"Pressure Drop: {liveDisplayPressure:F2} kPa";
+            if (perfEfficiencyText != null) perfEfficiencyText.text = $"Efficiency: {liveDisplayEfficiency:F1}%";
 
             UpdateUserInterfaceDisplay(cachedEfficiency, cachedDailyCost, cachedPressureDrop, cachedOutletPpm, cachedServiceLife);
             UpdateUnifiedMeshAppearance();
@@ -892,7 +1051,6 @@ public class UnifiedRefinerySimulator : MonoBehaviour
                 Color bypassTaintedColor = new Color(0.65f, 0.5f, 0.15f, 0.6f);
                 mainModule.startColor = Color.Lerp(bypassTaintedColor, cleanAirColor, efficiencyRatio);
             }
-
         }
         catch (System.Exception e)
         {
@@ -910,28 +1068,21 @@ public class UnifiedRefinerySimulator : MonoBehaviour
             default: return Color.gray;
         }
     }
+
     private void UpdateUnifiedMeshAppearance()
     {
         try
         {
             Color baseMatColor = GetMaterialBaseColor(cachedMaterialIndex);
-
-            // Define a natural oxidized rust color (burnt orange/brown)
             Color rustColor = new Color(0.55f, 0.30f, 0.15f, 1f);
 
-            // The accumulator naturally scales from 0 to 1 during the countdown
             float saturationFactor = Mathf.Clamp01(meshSaturationAccumulator);
-
-            // Lerp from the clean base color to the rusted color as time passes
             Color rustedColor = Color.Lerp(baseMatColor, rustColor, saturationFactor);
 
             float currentTemp = temperatureSlider != null ? temperatureSlider.value : 35f;
             float tempNormalized = Mathf.Clamp01(Mathf.InverseLerp(35f, 200f, currentTemp));
-
-            // Apply the temperature glow ON TOP of the currently rusted/clean state
             Color tempInfluencedColor = Color.Lerp(rustedColor, heatedReactorColor, tempNormalized);
 
-            // NEW: Only apply the Pressure Drop (Volume Load) redness if the simulation is actually running or concluded
             float safetyAlertFactor = 0f;
             if (currentRunState != SimulationState.STANDBY)
             {
@@ -958,7 +1109,6 @@ public class UnifiedRefinerySimulator : MonoBehaviour
                 reactorMaterial.color = targetReactorColor;
                 reactorMaterial.SetColor("_BaseColor", targetReactorColor);
             }
-
         }
         catch (System.Exception e)
         {
@@ -970,7 +1120,7 @@ public class UnifiedRefinerySimulator : MonoBehaviour
         try
         {
             if (rightSideEfficiencyText != null) rightSideEfficiencyText.text = $"{eff.ToString("F1")}%";
-            if (rightSideCostText != null) rightSideCostText.text = $"€{cost.ToString("F0")} / day";
+            if (rightSideCostText != null) rightSideCostText.text = $"â‚¬{cost.ToString("F0")} / day";
 
             if (detailedPressureDropText != null) detailedPressureDropText.text = $"Pressure Drop: {pressDrop.ToString("F2")} kPa";
             if (detailedOutletPpmText != null) detailedOutletPpmText.text = $"Outlet H2S: {outPpm.ToString("F2")} ppm";
@@ -1005,15 +1155,13 @@ public class UnifiedRefinerySimulator : MonoBehaviour
                 graphTrackingNode.anchoredPosition = new Vector2(clampedX, clampedY);
             }
 
-            // NEW: Update each individual graph with its specific standard parameters
             float expectedEff = expectedEfficiencySlider != null ? expectedEfficiencySlider.value : 100f;
             float currentTemp = temperatureSlider != null ? temperatureSlider.value : 55f;
 
             if (efficiencyGraph != null) efficiencyGraph.UpdateTelemetry(eff, expectedEff);
-            if (pressureGraph != null) pressureGraph.UpdateTelemetry(pressDrop, 6.5f); // 6.5 kPa safe limit
-            if (outletH2SGraph != null) outletH2SGraph.UpdateTelemetry(outPpm, 5.0f);  // 5.0 ppm safe limit
-            if (temperatureGraph != null) temperatureGraph.UpdateTelemetry(currentTemp, 55.0f); // 55 C std baseline
-
+            if (pressureGraph != null) pressureGraph.UpdateTelemetry(pressDrop, 6.5f);
+            if (outletH2SGraph != null) outletH2SGraph.UpdateTelemetry(outPpm, 5.0f);
+            if (temperatureGraph != null) temperatureGraph.UpdateTelemetry(currentTemp, 55.0f);
         }
         catch (System.Exception e)
         {
@@ -1029,11 +1177,8 @@ public class UnifiedRefinerySimulator : MonoBehaviour
     {
         try
         {
-            // If time is frozen (because the popup is open), disable the 3D zoom!
-            if (Time.timeScale == 0f)
-            {
-                return;
-            }
+            if (Time.timeScale == 0f) return;
+
             if (studioCamera != null && Mathf.Abs(Input.mouseScrollDelta.y) > 0.01f)
             {
                 if (studioCamera.orthographic)
@@ -1048,7 +1193,6 @@ public class UnifiedRefinerySimulator : MonoBehaviour
                     studioCamera.transform.localPosition = pos;
                 }
             }
-
         }
         catch (System.Exception e)
         {
