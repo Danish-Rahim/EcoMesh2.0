@@ -3,7 +3,42 @@ guid: d9f1f3e6b54af71409a62752550f7e54
 ModelImporter:
   serializedVersion: 24200
   internalIDToNameTable: []
-  externalObjects: {}
+  externalObjects:
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: MAT_Borosilicate_Glass
+    second: {fileID: 2100000, guid: f67afc16186cb7a4dabd97a3a82e53b1, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: MAT_Catalyst_Wire
+    second: {fileID: 2100000, guid: d37b177608bec1d45bf0f64c55d1589a, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: MAT_Dark_Details
+    second: {fileID: 2100000, guid: 348bbff8565173843ac6b872f916699e, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: MAT_Hardware_Steel
+    second: {fileID: 2100000, guid: 40cd8173901e21e47befcc0c9dba34c1, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: MAT_Meter_Face
+    second: {fileID: 2100000, guid: 4cb61b7d7602dea48905fcdeecfd6447, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: MAT_Meter_Needle
+    second: {fileID: 2100000, guid: 0abed6a922b929c48b349b0233877190, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: MAT_Reactor_Steel
+    second: {fileID: 2100000, guid: 83ea62a81ed1a424ab976731905c9753, type: 2}
   materials:
     materialImportMode: 2
     materialName: 0

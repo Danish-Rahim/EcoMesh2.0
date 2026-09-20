@@ -4,7 +4,6 @@ ScriptsOnlyBuild:
     - InteractiveTooltipManager
     - LiveECGGraph
     - MeshProfile
-    - Readme
     - RefineryInteractiveElement
     - SpinModel
     - TabNavigationManager
@@ -47,8 +46,6 @@ ScriptsOnlyBuild:
     - UnityEngine.InputSystem.InputSystemObject
     - UnityEngine.InputSystem.RemoteInputPlayerConnection
     - UnityEngine.InputSystem.UI.InputSystemUIInputModule
-    Unity.PlasticSCM.Editor.dll:
-    - Unity.PlasticSCM.Editor.UVCSWindow
     Unity.RenderPipelines.Core.Runtime:
     - UnityEngine.Rendering.UI.DebugUIHandlerBitField
     - UnityEngine.Rendering.UI.DebugUIHandlerButton
@@ -128,6 +125,7 @@ ScriptsOnlyBuild:
     - TMPro.TMP_FontAsset
     - TMPro.TMP_Settings
     - TMPro.TMP_StyleSheet
+    - TMPro.TMP_SubMeshUI
     - TMPro.TextMeshProUGUI
     UnityEditor.TestRunner.dll:
     - UnityEditor.TestTools.TestRunner.Api.CallbacksHolder
@@ -560,12 +558,6 @@ ScriptsOnlyBuild:
     assemblyName: Unity.RenderPipelines.Universal.Runtime
     namespaceName: UnityEngine.Rendering.Universal
     className: UniversalRenderPipelineAsset
-  - hash:
-      serializedVersion: 2
-      Hash: ca6f0a67fe151a9aba0090c0cd99cb3e
-    assemblyName: Assembly-CSharp
-    namespaceName: 
-    className: UnifiedRefinerySimulator
   - hash:
       serializedVersion: 2
       Hash: 95c8a8c68e664d4868755f06e7c55997
@@ -1786,6 +1778,12 @@ ScriptsOnlyBuild:
     className: DebugUIHandlerButton
   - hash:
       serializedVersion: 2
+      Hash: 271760fc6f8997c192b9b363e700cc5a
+    assemblyName: Assembly-CSharp
+    namespaceName: 
+    className: UnifiedRefinerySimulator
+  - hash:
+      serializedVersion: 2
       Hash: ff76cf6cf52b4db7b95af6ffadca9288
     assemblyName: Unity.Timeline
     namespaceName: UnityEngine.Timeline
@@ -2320,7 +2318,7 @@ ScriptsOnlyBuild:
     className: DebugUIHandlerToggle
   - hash:
       serializedVersion: 2
-      Hash: f844b061c7432668622a7c5347cfcd83
+      Hash: 5409e1479d72a91e7405013df146fadc
     assemblyName: Assembly-CSharp
     namespaceName: 
     className: InteractiveTooltipManager
@@ -2430,4 +2428,4 @@ ScriptsOnlyBuild:
   scenePathNames:
   - Assets/Scenes/SampleScene.unity
   nativeClasses: 
-  playerPath: E:/UnityProjects/Ecomesh2.0 Builds/Window Build 28 Aug/EcoMesh2.0.exe
+  playerPath: E:/UnityProjects/EcoMesh2.0 Built 20 Sept/EcoMesh2.0.exe
