@@ -39,7 +39,7 @@ public class UnifiedRefinerySimulator : MonoBehaviour
     private List<SimulationHistoryRecord> simulationHistoryLog = new List<SimulationHistoryRecord>();
     private const string HISTORY_SAVE_KEY = "Refinery_Simulation_History_V1";
 
-    static private float runtimeCountdownClockStatic = 20.0f;
+    static private float runtimeCountdownClockStatic = 11.0f;
     private float runtimeCountdownClock = runtimeCountdownClockStatic;
     private float meshSaturationAccumulator = 0.0f;
 
@@ -67,11 +67,14 @@ public class UnifiedRefinerySimulator : MonoBehaviour
     public Slider gasVolumeSlider;
     public Slider h2sSlider;
     public Slider temperatureSlider;
+    public Slider inletPressureSlider;
+
 
     [Header("Fullscreen Mirrored Controls")]
     public Slider fullscreenGasVolumeSlider;
     public Slider fullscreenH2SSlider;
     public Slider fullscreenTemperatureSlider;
+    public Slider fullscreenInletPressureSlider;
     public Button fullscreenMainRunButton;
     private TextMeshProUGUI fullscreenRunButtonText;
 
@@ -111,6 +114,12 @@ public class UnifiedRefinerySimulator : MonoBehaviour
     public TextMeshProUGUI altPerfPressureText;
     public TextMeshProUGUI altPerfEfficiencyText;
     public TextMeshProUGUI altPerfServiceLifeText;
+
+    [Header("Equipment Overview UI")]
+    public TextMeshProUGUI equipmentModelIdText;
+    public TextMeshProUGUI equipmentMaterialText;
+    public TextMeshProUGUI equipmentBedDepthText;
+    public TextMeshProUGUI equipmentMeshSizeText;
 
     [Header("Graph Header Readouts")]
     public TextMeshProUGUI graphHeaderEfficiencyText;
@@ -205,6 +214,7 @@ public class UnifiedRefinerySimulator : MonoBehaviour
             SyncSliders(gasVolumeSlider, fullscreenGasVolumeSlider);
             SyncSliders(h2sSlider, fullscreenH2SSlider);
             SyncSliders(temperatureSlider, fullscreenTemperatureSlider);
+            SyncSliders(inletPressureSlider, fullscreenInletPressureSlider);
 
             if (catalystMeshes != null)
             {
@@ -223,6 +233,22 @@ public class UnifiedRefinerySimulator : MonoBehaviour
             isStartIteration = true;
             ClearParticles();
             LoadSimulationHistoryFromStorage();
+
+            // --- ADD THESE LINES HERE ---
+            string selectedMaterial = meshMaterialDropdown != null ? meshMaterialDropdown.options[meshMaterialDropdown.value].text : "Unknown";
+            string selectedMeshSize = meshOpeningSizeDropdown != null ? meshOpeningSizeDropdown.options[meshOpeningSizeDropdown.value].text : "Unknown";
+
+            if (equipmentMaterialText != null) 
+                equipmentMaterialText.text = $"Material: {selectedMaterial}";
+
+            if (equipmentBedDepthText != null) 
+                equipmentBedDepthText.text = $"Bed depth: {cachedBedDepthL:F2} m";
+
+            if (equipmentMeshSizeText != null) 
+                equipmentMeshSizeText.text = $"Mesh size: {selectedMeshSize}";
+            // ----------------------------
+
+
             ResetSimulationToStandby();
             UpdateHistoryLogDisplayUI();
             UpdateUnifiedMeshAppearance();
@@ -656,6 +682,21 @@ public class UnifiedRefinerySimulator : MonoBehaviour
                 }
             }
 
+            // --- LIVE EQUIPMENT OVERVIEW UPDATE ---
+            string selectedMaterial = meshMaterialDropdown != null ? meshMaterialDropdown.options[meshMaterialDropdown.value].text : "Unknown";
+            string selectedMeshSize = meshOpeningSizeDropdown != null ? meshOpeningSizeDropdown.options[meshOpeningSizeDropdown.value].text : "Unknown";
+
+            if (equipmentMaterialText != null) 
+                equipmentMaterialText.text = $"Material: {selectedMaterial}";
+
+            if (equipmentBedDepthText != null) 
+                equipmentBedDepthText.text = $"Bed depth: {cachedBedDepthL:F2} m";
+
+            if (equipmentMeshSizeText != null) 
+                equipmentMeshSizeText.text = $"Mesh size: {selectedMeshSize}";
+            
+            // -------------------------------------
+
             Update3DModelStructure();
             UpdateUnifiedMeshAppearance();
         }
@@ -751,7 +792,7 @@ public class UnifiedRefinerySimulator : MonoBehaviour
         }
     }
 
-    private void FinishAndEvaluateRun()
+private void FinishAndEvaluateRun()
     {
         try
         {
@@ -764,62 +805,67 @@ public class UnifiedRefinerySimulator : MonoBehaviour
             if (outletH2SGraph != null) outletH2SGraph.isSimulationRunning = false;
             if (temperatureGraph != null) temperatureGraph.isSimulationRunning = false;
 
-            // Restore Run Button to original state and make it interactable again
             SyncRunButtonState("ENGAGE REACTOR", true);
             ToggleStructuralUIInteractability(true);
 
             if (evaluationOverlayPanel != null) evaluationOverlayPanel.transform.SetAsLastSibling();
 
+            // --- UPDATED TEAM LIMITS ---
+            string effStatus = cachedEfficiency >= 60f ? "<color=green>[NORMAL]</color>" : (cachedEfficiency >= 50f ? "<color=yellow>[WARNING]</color>" : "<color=red>[FAILURE]</color>");
+            string dpStatus = cachedPressureDrop <= 4.0f ? "<color=green>[NORMAL]</color>" : (cachedPressureDrop <= 6.5f ? "<color=yellow>[WARNING]</color>" : "<color=red>[FAILURE]</color>");
+            
+            // Outlet H2S Limits: Normal < 50, Warning 50-150, Failure > 150
+            string h2sStatus = cachedOutletPpm < 50.0f ? "<color=green>[NORMAL]</color>" : (cachedOutletPpm <= 150.0f ? "<color=yellow>[WARNING]</color>" : "<color=red>[FAILURE]</color>");
+            
+            // Operating Cost Limits: Normal <= 500, Warning 500-1000, Failure > 1000#
+            string costStatus = cachedDailyCost <= 500.0f ? "<color=green>[NORMAL]</color>" : (cachedDailyCost <= 1000.0f ? "<color=yellow>[WARNING]</color>" : "<color=red>[FAILURE]</color>");
+            
+            float tempC = temperatureSlider != null ? temperatureSlider.value : 38f;
+            string tempStatus = (tempC >= 25f && tempC <= 45f) ? "<color=green>[NORMAL]</color>" : (tempC <= 60f ? "<color=yellow>[WARNING]</color>" : "<color=red>[FAILURE]</color>");
+
+            bool hasFailures = cachedEfficiency < 50f || cachedPressureDrop > 6.5f || cachedOutletPpm > 150.0f || cachedDailyCost > 1000f || tempC > 60f;
+            bool hasWarnings = cachedEfficiency < 60f || (cachedPressureDrop > 4f && cachedPressureDrop <= 6.5f) || (cachedOutletPpm >= 50f && cachedOutletPpm <= 150.0f) || (cachedDailyCost > 500f && cachedDailyCost <= 1000f) || (tempC > 45f && tempC <= 60f);
+
             string popupTitle = "";
-            string popupMessage = "";
-            bool runSuccess = false;
-            string grade = "F";
+            bool runSuccess = !hasFailures;
+            string scenarioName = "Normal Operation";
 
-            float expectedEff = expectedEfficiencySlider != null ? expectedEfficiencySlider.value : 85f;
-            float expectedCost = estimatedCostSlider != null ? estimatedCostSlider.value : 1500f;
-
-            if (cachedPressureDrop > 6.5f)
+            if (hasFailures)
             {
-                popupTitle = "<color=red>CRITICAL PLANT DISASTER</color>";
-                popupMessage = $"<b>RUN FAILED</b>\n\nCatastrophic structural failure! Pressure drop hit {cachedPressureDrop:F2} kPa, exceeding casing limits.";
+                popupTitle = "<color=red><b>SHIFT CONCLUDED - CRITICAL FAILURE</b></color>";
+                if (cachedPressureDrop > 6.5f) scenarioName = "High Pressure Drop (Flow Restriction)";
+                else if (cachedOutletPpm > 150.0f) scenarioName = "H2S Breakthrough / Toxic Disaster (>150 ppm)";
+                else if (cachedDailyCost > 10000f) scenarioName = "Budget Overrun (High Cost)";
+                else if (cachedEfficiency < 50f) scenarioName = "Low Removal Efficiency";
+                else scenarioName = "Multiple System Failures";
             }
-            else if (cachedOutletPpm > 5.0f)
+            else if (hasWarnings)
             {
-                popupTitle = "<color=red>CRITICAL PLANT DISASTER</color>";
-                popupMessage = $"<b>RUN FAILED</b>\n\nToxic venting breach! Outlet concentrations hit {cachedOutletPpm:F1} ppm, violating EPA standards.";
-            }
-            else if (cachedDailyCost > 3000f)
-            {
-                popupTitle = "<color=yellow>BUDGET OVERRUN</color>";
-                popupMessage = $"<b>RUN FAILED</b>\n\nSystem operates safely but exceeds daily operating budget.";
+                popupTitle = "<color=yellow><b>SHIFT CONCLUDED - OPERATIONAL WARNING</b></color>";
+                scenarioName = "Efficiency Warning / Boundary Limit Reached";
             }
             else
             {
-                runSuccess = true;
-                float effVariance = Mathf.Abs(cachedEfficiency - expectedEff);
-                float costVariance = Mathf.Abs(cachedDailyCost - expectedCost);
-
-                if (effVariance <= 2.0f && costVariance <= 200f) grade = "A+";
-                else if (effVariance <= 5.0f && costVariance <= 500f) grade = "A";
-                else if (effVariance <= 10.0f && costVariance <= 800f) grade = "B";
-                else grade = "C";
-
-                popupTitle = $"<color=green>SHIFT SUCCESS - GRADE {grade}</color>";
-                popupMessage = $"<b>CONGRATULATIONS, OPERATOR!</b>\n\nReactor operates safely.\n\n<b>Estimation Accuracy:</b>\nEfficiency Variance: {effVariance:F1}%\nCost Variance: €{costVariance:F0}";
+                popupTitle = "<color=green><b>SHIFT CONCLUDED - RUN SUCCESSFUL</b></color>";
+                scenarioName = cachedEfficiency > 70f ? "Low-load Efficient Operation" : "Standard Normal Operation";
             }
+
+            string popupMessage = $"<b>Identified Scenario:</b> {scenarioName}\n\n" +
+                                  $"<b>Performance Breakdown:</b>\n" +
+                                  $"• Removal Efficiency: <b>{cachedEfficiency:F1}%</b> {effStatus}\n" +
+                                  $"• Pressure Drop (ΔP): <b>{cachedPressureDrop:F2} kPa</b> {dpStatus}\n" +
+                                  $"• Outlet H2S: <b>{cachedOutletPpm:F2} ppm</b> {h2sStatus}\n" +
+                                  $"• Operating Temp (T): <b>{tempC:F1} °C</b> {tempStatus}\n" +
+                                  $"• Daily Operating Cost: <b>€{cachedDailyCost:F0}/day</b> {costStatus}\n\n" +
+                                  (hasFailures ? "<i>Action Required: Adjust stream flow, temperature, or upgrade mesh material to meet safety limits.</i>" : "<i>Great job! Plant parameters remain within safe industrial limits.</i>");
 
             if (evaluationTitleText != null) evaluationTitleText.text = popupTitle;
-            if (evaluationReportText != null)
-            {
-                evaluationReportText.text = $"{popupMessage}\n\n<b>Final Telemetry Snapshot:</b>\n" +
-                                            $"Efficiency: {cachedEfficiency:F1}%\n" +
-                                            $"Real-time Operational Cost: €{cachedDailyCost:F2}/day";
-            }
+            if (evaluationReportText != null) evaluationReportText.text = popupMessage;
 
             if (restartRunButton != null) restartRunButton.gameObject.SetActive(true);
             if (evaluationOverlayPanel != null) evaluationOverlayPanel.SetActive(true);
 
-            ArchiveRunToHistoryLog(runSuccess, grade);
+            ArchiveRunToHistoryLog(runSuccess, hasFailures ? "FAIL" : (hasWarnings ? "WARN" : "PASS"));
             ClearParticles();
         }
         catch (System.Exception e)
@@ -957,53 +1003,92 @@ public class UnifiedRefinerySimulator : MonoBehaviour
     // ==========================================
     // MATHEMATICAL FRAMEWORK
     // ==========================================
+    // ==========================================
+    // MATHEMATICAL FRAMEWORK
+    // ==========================================
     private void EvaluateSystemPhysics()
     {
         try
         {
-            float columnArea = 2.0f;
-            float baseKineticK = 1.29f;
+            // 1. Read Inputs from Sliders & UI
+            float Q_N = gasVolumeSlider != null ? gasVolumeSlider.value : 5000f;       // Nm3/h (500 - 7000)
+            float C_in = h2sSlider != null ? h2sSlider.value : 1000f;                  // ppm (500 - 4000)
+            float tempC = temperatureSlider != null ? temperatureSlider.value : 38f;   // °C (20 - 65)
+            float P_bar = inletPressureSlider != null ? inletPressureSlider.value : 15f; // bar (5 - 45)
+            float bedDepthL = cachedBedDepthL;                                         // H (m)
 
-            float gasFlowQ = gasVolumeSlider != null ? gasVolumeSlider.value : 750f;
-            float inletH2S = h2sSlider != null ? h2sSlider.value : 850f;
-            float tempC = temperatureSlider != null ? temperatureSlider.value : 55f;
-            float bedDepthL = cachedBedDepthL;
+            // 2. Constants & Conversions
+            float T = tempC + 273.15f;          // Temperature in Kelvin
+            float T_N = 273.15f;                // Normal Temperature (0°C)
+            float P_N = 1.01325f;             // Normal Pressure (bar)
+            float P = Mathf.Max(P_bar, 0.1f);   // Inlet Pressure (bar)
+            float M = 28.97f;                   // Molar mass of gas (g/mol)
+            float Z = 0.98f;                    // Compressibility factor
+            float R = 8.314f;                   // Universal gas constant
 
-            float[] matKinetics = { 1.0f, 0.8f, 1.3f, 1.1f };
-            float[] matDurability = { 1.0f, 0.6f, 2.0f, 0.8f };
-            float[] matBaseCost = { 100f, 50f, 400f, 150f };
+            // Column Dimensions & Opening size mapping
+            float columnDiameterD = 1.0f;       // Meters (D)
+            float[] openingSizes = { 8.0f, 6.0f, 4.0f }; // d_o in mm based on dropdown index
+            int safeOpenIndex = Mathf.Clamp(cachedOpeningSizeIndex, 0, openingSizes.Length - 1);
+            float d_o = openingSizes[safeOpenIndex];
 
-            float[] openingArea = { 1.4f, 1.0f, 0.7f };
-            float[] openingDrop = { 1.6f, 1.0f, 0.5f };
+            // Material K_mesh mapping based on engineers' table:
+            // 0: PTFE-coated stainless steel (1.8), 1: Glass (2.0), 2: Monel alloy (2.2), 3: Titanium (2.1)
+            float[] materialKMesh = { 1.8f, 2.0f, 2.2f, 2.1f };
+            int safeMatIndex = Mathf.Clamp(cachedMaterialIndex, 0, materialKMesh.Length - 1);
+            float K_mesh = materialKMesh[safeMatIndex];
 
-            int safeMatIndex = Mathf.Clamp(cachedMaterialIndex, 0, 3);
-            int safeOpenIndex = Mathf.Clamp(cachedOpeningSizeIndex, 0, 2);
+            // 3. Core Formulas from Engineering Model
+            // Q_actual = Q_N * (T / T_N) * (P_N / P)
+            float Q_actual = Q_N * (T / T_N) * (P_N / P);
 
-            float superficialVelocity = (gasFlowQ / 3600f) / columnArea;
-            float gasContactTime = bedDepthL / (superficialVelocity > 0 ? superficialVelocity : 0.0001f);
+            // A = (pi * D^2) / 4
+            float A = (Mathf.PI * Mathf.Pow(columnDiameterD, 2.0f)) / 4.0f;
 
-            cachedPressureDrop = (1.5f * superficialVelocity + 0.5f * Mathf.Pow(superficialVelocity, 2))
-                                 * bedDepthL
-                                 * openingDrop[safeOpenIndex];
+            // V_g = Q_actual / (3600 * A)
+            float V_g = Q_actual / (3600.0f * Mathf.Max(A, 0.001f));
 
-            float tempModifier = 1.0f + ((tempC - 55f) * 0.02f);
-            float adjustedK = baseKineticK * tempModifier * matKinetics[safeMatIndex] * openingArea[safeOpenIndex];
+            // rho_g = (P * M) / (Z * R * T)
+            // Scaled for bar and kg/m3 consistency
+            float rho_g = (P * 100f * M) / (Z * R * T); 
 
-            cachedEfficiency = 100f * (1f - Mathf.Exp(-adjustedK * gasContactTime));
-            cachedEfficiency = Mathf.Clamp(cachedEfficiency, 0f, 99.99f);
-            cachedOutletPpm = inletH2S * (1f - (cachedEfficiency / 100f));
+            // Delta P = K_mesh * (rho_g * V_g^2) / 2 (converted to kPa)
+            //cachedPressureDrop = (K_mesh * rho_g * Mathf.Pow(V_g, 2.0f) / 2.0f) / 1000f;
 
-            float blowerPowerKW = (gasFlowQ / 3600f * (cachedPressureDrop * 1000f)) / 0.75f / 1000f;
-            float dailyEnergyCost = blowerPowerKW * 24f * 0.15f;
-            float dailyCapturedH2SKg = (gasFlowQ * inletH2S * 1.2f * 34.08f) / 1e6f / 3600f * 86400f * (cachedEfficiency / 100f);
-            float dailyRegenerationCost = dailyCapturedH2SKg * 1.80f;
-            float structuralDepreciation = matBaseCost[safeMatIndex];
+            // With this scaled and bed-depth-multiplied version:
+            float basePressurePa = K_mesh * rho_g * Mathf.Pow(V_g, 2.0f) / 2.0f;
+            // Multiply by bed depth (bedDepthL) and a standard industrial flow resistance factor
+            cachedPressureDrop = (basePressurePa * bedDepthL * 15.0f) / 1000f; 
+            cachedPressureDrop = Mathf.Clamp(cachedPressureDrop, 0.05f, 15.0f);
 
-            float rawDailyCost = dailyEnergyCost + dailyRegenerationCost + structuralDepreciation;
-            cachedDailyCost = Mathf.Clamp(rawDailyCost, 0f, 10000f);
-            cachedServiceLife = (145f * matDurability[safeMatIndex]) - (dailyCapturedH2SKg * 0.1f);
+            // Efficiency eta = 0.50 * (H / 0.50)^0.35 * (5000 / Q_N)^0.25 * (8 / d_o)^0.20 * (38 / T)^0.10
+            // Note: Using T_C or T depending on formula normalization; here using tempC
+            float etaCalc = 0.50f * Mathf.Pow(bedDepthL / 0.50f, 0.35f)
+                                  * Mathf.Pow(5000f / Mathf.Max(Q_N, 1f), 0.25f)
+                                  * Mathf.Pow(8.0f / Mathf.Max(d_o, 0.1f), 0.20f)
+                                  * Mathf.Pow(38f / Mathf.Max(tempC, 1f), 0.10f);
 
-            // Live Output Card real-time telemetry calculation
+            cachedEfficiency = Mathf.Clamp(etaCalc * 100f, 0f, 100f);
+
+            // C_out = C_in * (1 - eta)
+            cachedOutletPpm = C_in * (1.0f - (cachedEfficiency / 100f));
+
+            // Cost calculations
+            float etaComp = 0.75f; // compressor efficiency
+            float powerLossKW = (cachedPressureDrop * 1000f * Q_actual / 3600f) / etaComp / 1000f;
+            float cEnergy = powerLossKW * 24f * 0.15f; // Daily energy cost
+            
+            float dailyCapturedH2SKg = (Q_N * C_in * 1.2f * 34.08f) / 1e6f / 3600f * 86400f * (cachedEfficiency / 100f);
+            float cMaintenance = dailyCapturedH2SKg * 1.80f;
+            
+            float[] matBaseCosts = { 120f, 90f, 350f, 250f };
+            float cBase = matBaseCosts[safeMatIndex] * bedDepthL;
+            float cReplacement = 50f * (100f / Mathf.Max(cachedEfficiency, 1f));
+
+            cachedDailyCost = Mathf.Clamp(cBase + cEnergy + cMaintenance + cReplacement, 0f, 10000f);
+            cachedServiceLife = Mathf.Max(10f, 200f - (dailyCapturedH2SKg * 0.5f) - (tempC * 1.2f));
+
+            // 4. Live Telemetry Polling & Visual Updates
             float liveDisplayOutlet = cachedOutletPpm;
             float liveDisplayTemp = tempC;
             float liveDisplayPressure = cachedPressureDrop;
@@ -1011,11 +1096,11 @@ public class UnifiedRefinerySimulator : MonoBehaviour
 
             if (currentRunState == SimulationState.RUNNING)
             {
-                float fluctuation = Random.Range(-0.008f, 0.008f);
-                liveDisplayEfficiency = Mathf.Clamp(cachedEfficiency * (1f + fluctuation), 0f, 99.99f);
+                float fluctuation = Random.Range(-0.005f, 0.005f);
+                liveDisplayEfficiency = Mathf.Clamp(cachedEfficiency * (1f + fluctuation), 0f, 100f);
                 liveDisplayPressure = cachedPressureDrop * (1f + fluctuation);
                 liveDisplayOutlet = cachedOutletPpm * (1f + fluctuation);
-                liveDisplayTemp = tempC + Random.Range(-0.3f, 0.3f);
+                liveDisplayTemp = tempC + Random.Range(-0.2f, 0.2f);
             }
 
             if (perfOutletH2SText != null) perfOutletH2SText.text = $"Outlet H2S: {liveDisplayOutlet:F2} ppm";
@@ -1026,34 +1111,26 @@ public class UnifiedRefinerySimulator : MonoBehaviour
             UpdateUserInterfaceDisplay(cachedEfficiency, cachedDailyCost, cachedPressureDrop, cachedOutletPpm, cachedServiceLife);
             UpdateUnifiedMeshAppearance();
 
+            // Particle Flow updates
             if (inletParticles != null)
             {
                 var mainModule = inletParticles.main;
                 var emissionModule = inletParticles.emission;
-
-                mainModule.startSpeed = (gasFlowQ / 3600f) * 2.0f;
-                emissionModule.rateOverTime = currentRunState == SimulationState.RUNNING ? Mathf.Lerp(20f, 120f, Mathf.InverseLerp(0f, 2000f, inletH2S)) : 0f;
-
-                float toxicityFactor = Mathf.InverseLerp(0f, 2000f, inletH2S);
-                mainModule.startColor = Color.Lerp(new Color(0.5f, 0.45f, 0.3f, 0.4f), new Color(0.75f, 0.55f, 0.1f, 0.75f), toxicityFactor);
+                mainModule.startSpeed = (Q_actual / 3600f) * 2.0f;
+                emissionModule.rateOverTime = currentRunState == SimulationState.RUNNING ? Mathf.Lerp(20f, 120f, Mathf.InverseLerp(500f, 4000f, C_in)) : 0f;
             }
 
             if (outletParticles != null)
             {
                 var mainModule = outletParticles.main;
                 var emissionModule = outletParticles.emission;
-
-                mainModule.startSpeed = (gasFlowQ / 3600f) * 2.5f;
+                mainModule.startSpeed = (Q_actual / 3600f) * 2.5f;
                 emissionModule.rateOverTime = (currentRunState == SimulationState.RUNNING && inletParticles != null) ? inletParticles.emission.rateOverTime.constant : 0f;
-
-                float efficiencyRatio = cachedEfficiency / 100f;
-                Color cleanAirColor = new Color(0.4f, 0.75f, 1.0f, 0.3f);
-                Color bypassTaintedColor = new Color(0.65f, 0.5f, 0.15f, 0.6f);
-                mainModule.startColor = Color.Lerp(bypassTaintedColor, cleanAirColor, efficiencyRatio);
             }
         }
         catch (System.Exception e)
         {
+            Debug.LogError($"[EvaluateSystemPhysics] Error: {e.Message}");
         }
     }
 
