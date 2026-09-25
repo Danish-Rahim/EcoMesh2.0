@@ -133,6 +133,19 @@ public class UnifiedRefinerySimulator : MonoBehaviour
 
     private float perfSummaryTimer = 1.0f;
 
+    [Header("User Audit & Operational Log System")]
+    public GameObject userLogsModal;              // Assign your log modal panel here
+    public TextMeshProUGUI logContentText;        // Assign the scrollable TextMeshPro text here
+    public TextMeshProUGUI logSummaryHeader;      // Assign modal status/header text here
+    public Button btnShowUserLogs;                // Assign your UI button here
+    public Button btnCloseUserLogs;               // Assign modal close button here
+    public Button btnClearUserLogs;               // (Optional) purge button
+
+    private List<string> operationalAuditLog = new List<string>();
+    private const int MaxLogEntries = 60;
+    private const string AUDIT_LOG_PREF_KEY = "Refinery_Audit_Logs_V1";
+
+
     [Header("Historical Reports & Graphing")]
     public TextMeshProUGUI[] historyRowTexts;
     public RectTransform graphBoundingBox;
@@ -206,6 +219,16 @@ public class UnifiedRefinerySimulator : MonoBehaviour
 
             if (btnGenerateModel != null) btnGenerateModel.onClick.AddListener(OnGenerateHardwareModelConfirmed);
             if (restartRunButton != null) restartRunButton.onClick.AddListener(ResetSimulationToStandby);
+            if (btnShowUserLogs != null) btnShowUserLogs.onClick.AddListener(ToggleUserLogsModal);
+            if (btnCloseUserLogs != null) btnCloseUserLogs.onClick.AddListener(() => SetUserLogsModalActive(false));
+            if (btnClearUserLogs != null) btnClearUserLogs.onClick.AddListener(ClearUserLogs);
+
+            LoadAuditLogsFromStorage();
+            if (operationalAuditLog.Count == 0)
+            {
+                RecordLogEntry("SYSTEM_INIT", "Training Simulator initialized. Sensor polling active.", "NORMAL");
+            }
+            
             if (closeEvaluationPopupButton != null) closeEvaluationPopupButton.onClick.AddListener(CloseEvaluationPopup);
             if (quitApplicationButton != null) quitApplicationButton.onClick.AddListener(QuitRefinerySimulator);
             if (maximizeViewportButton != null) maximizeViewportButton.onClick.AddListener(() => SetFullscreenOverlayActive(true));
@@ -499,7 +522,7 @@ public class UnifiedRefinerySimulator : MonoBehaviour
             List<string> activeWarnings = new List<string>();
 
             if (cachedPressureDrop > 6.5f) activeWarnings.Add($"Pressure Critical ({cachedPressureDrop:F1} kPa)");
-            if (cachedOutletPpm > 5.0f) activeWarnings.Add($"Toxic Leak ({cachedOutletPpm:F1} ppm)");
+            if (cachedOutletPpm > 50.0f) activeWarnings.Add($"Toxic Leak ({cachedOutletPpm:F1} ppm)");
             if (cachedDailyCost > 3000f) activeWarnings.Add($"Budget Overflow (€{cachedDailyCost:F0})");
 
             string timeStamp = System.DateTime.Now.ToString("HH:mm:ss");
@@ -510,6 +533,11 @@ public class UnifiedRefinerySimulator : MonoBehaviour
                 string combinedWarnings = string.Join(" | ", activeWarnings);
                 AddMessageToAlarmLog($"[{timeStamp}] <color=red>WARNING: {combinedWarnings}</color>");
                 UpdateAlarmHeaderUI(true);
+
+                if (isInAlarmState && !wasInAlarmState)
+            {
+                RecordLogEntry("ALARM_TRIGGER", $"Exceeded safety limits: {string.Join(" | ", activeWarnings)}", "WARNING");
+            }
             }
             else if (wasInAlarmState)
             {
@@ -596,7 +624,7 @@ public class UnifiedRefinerySimulator : MonoBehaviour
                 if (graphHeaderSafePressureText != null) graphHeaderSafePressureText.text = "Safe: < 6.5 kPa";
 
                 if (graphHeaderOutletText != null) graphHeaderOutletText.text = $"{liveOutlet:F2} ppm";
-                if (graphHeaderSafeOutletText != null) graphHeaderSafeOutletText.text = "Safe: < 5.0 ppm";
+                if (graphHeaderSafeOutletText != null) graphHeaderSafeOutletText.text = "Safe: < 50.0 ppm";
 
                 if (graphHeaderTempText != null) graphHeaderTempText.text = $"{liveTemp:F1} °C";
                 if (graphHeaderSafeTempText != null) graphHeaderSafeTempText.text = "Std: 55.0 °C";
@@ -636,7 +664,7 @@ public class UnifiedRefinerySimulator : MonoBehaviour
             if (graphHeaderSafePressureText != null) graphHeaderSafePressureText.text = "Safe: < 6.5 kPa";
 
             if (graphHeaderOutletText != null) graphHeaderOutletText.text = "0.00 ppm";
-            if (graphHeaderSafeOutletText != null) graphHeaderSafeOutletText.text = "Safe: < 5.0 ppm";
+            if (graphHeaderSafeOutletText != null) graphHeaderSafeOutletText.text = "Safe: < 50.0 ppm";
 
             if (graphHeaderTempText != null) graphHeaderTempText.text = "0.0 °C";
             if (graphHeaderSafeTempText != null) graphHeaderSafeTempText.text = "Std: 25.0 °C";
@@ -686,8 +714,7 @@ public class UnifiedRefinerySimulator : MonoBehaviour
             string selectedMaterial = meshMaterialDropdown != null ? meshMaterialDropdown.options[meshMaterialDropdown.value].text : "Unknown";
             string selectedMeshSize = meshOpeningSizeDropdown != null ? meshOpeningSizeDropdown.options[meshOpeningSizeDropdown.value].text : "Unknown";
 
-            if (equipmentMaterialText != null) 
-                equipmentMaterialText.text = $"Material: {selectedMaterial}";
+            if (equipmentMaterialText != null) equipmentMaterialText.text = $"Material: {selectedMaterial}";
 
             if (equipmentBedDepthText != null) 
                 equipmentBedDepthText.text = $"Bed depth: {cachedBedDepthL:F2} m";
@@ -741,6 +768,8 @@ public class UnifiedRefinerySimulator : MonoBehaviour
         try
         {
             currentRunState = SimulationState.RUNNING;
+            string matName = meshMaterialDropdown != null ? meshMaterialDropdown.options[meshMaterialDropdown.value].text : "Unknown";
+            RecordLogEntry("REACTOR_ENGAGED", $"Operator initiated desulfurization shift. Hardware: {matName} ({cachedBedDepthL:F2} m bed).", "NORMAL");
             runtimeCountdownClock = runtimeCountdownClockStatic;
             meshSaturationAccumulator = 0.0f;
 
@@ -864,6 +893,9 @@ private void FinishAndEvaluateRun()
 
             if (restartRunButton != null) restartRunButton.gameObject.SetActive(true);
             if (evaluationOverlayPanel != null) evaluationOverlayPanel.SetActive(true);
+
+            string outcomeSeverity = hasFailures ? "CRITICAL" : (hasWarnings ? "WARNING" : "NORMAL");
+            RecordLogEntry("SHIFT_CONCLUDED", $"Shift completed with scenario '{scenarioName}'. Overall result: {(runSuccess ? "PASS" : "FAIL")}.", outcomeSeverity);
 
             ArchiveRunToHistoryLog(runSuccess, hasFailures ? "FAIL" : (hasWarnings ? "WARN" : "PASS"));
             ClearParticles();
@@ -1205,7 +1237,7 @@ private void FinishAndEvaluateRun()
 
             if (detailedComplianceStatusText != null)
             {
-                if (outPpm > 5.0f || pressDrop > 6.5f || cost > 3000f)
+                if (outPpm > 50.0f || pressDrop > 6.5f || cost > 3000f)
                 {
                     detailedComplianceStatusText.text = currentRunState == SimulationState.RUNNING ? "Status: SYSTEM UNDER DURESS" : "Status: NON-COMPLIANT";
                     detailedComplianceStatusText.color = Color.red;
@@ -1237,7 +1269,7 @@ private void FinishAndEvaluateRun()
 
             if (efficiencyGraph != null) efficiencyGraph.UpdateTelemetry(eff, expectedEff);
             if (pressureGraph != null) pressureGraph.UpdateTelemetry(pressDrop, 6.5f);
-            if (outletH2SGraph != null) outletH2SGraph.UpdateTelemetry(outPpm, 5.0f);
+            if (outletH2SGraph != null) outletH2SGraph.UpdateTelemetry(outPpm, 50.0f);
             if (temperatureGraph != null) temperatureGraph.UpdateTelemetry(currentTemp, 55.0f);
         }
         catch (System.Exception e)
@@ -1273,6 +1305,130 @@ private void FinishAndEvaluateRun()
         }
         catch (System.Exception e)
         {
+        }
+    }
+
+    // ==========================================
+    // OPERATIONAL AUDIT & USER LOGGING ENGINE
+    // ==========================================
+    public void RecordLogEntry(string eventTag, string eventDescription, string severity = "NORMAL")
+    {
+        try
+        {
+            string timeStamp = System.DateTime.Now.ToString("HH:mm:ss");
+            string colorTag = severity switch
+            {
+                "CRITICAL" => "<color=#FF4444>[CRITICAL]</color>",
+                "WARNING"  => "<color=#FFCC00>[WARNING]</color>",
+                _          => "<color=#00FF66>[NORMAL]</color>"
+            };
+
+            float Q_N = gasVolumeSlider != null ? gasVolumeSlider.value : 5000f;
+            float P_bar = inletPressureSlider != null ? inletPressureSlider.value : 15f;
+            float tempC = temperatureSlider != null ? temperatureSlider.value : 38f;
+            float C_in = h2sSlider != null ? h2sSlider.value : 1000f;
+
+            string entry = $"<b>[{timeStamp}]</b> {colorTag} <b>{eventTag}</b>: {eventDescription}\n" +
+                           $"   <color=#88AACC>↳ Telemetry:</color> Flow: {Q_N:F0} Nm³/h | Press: {P_bar:F1} bar | Temp: {tempC:F1} °C\n" +
+                           $"   <color=#88AACC>↳ Performance:</color> Cin: {C_in:F0} ppm ➔ Cout: {cachedOutletPpm:F2} ppm | Eff: {cachedEfficiency:F1}% | ΔP: {cachedPressureDrop:F3} kPa";
+
+            operationalAuditLog.Insert(0, entry);
+
+            while (operationalAuditLog.Count > MaxLogEntries)
+            {
+                operationalAuditLog.RemoveAt(operationalAuditLog.Count - 1);
+            }
+
+            SaveAuditLogsToStorage();
+            UpdateLogDisplayUI();
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError($"[RecordLogEntry] Error: {e.Message}");
+        }
+    }
+
+    public void UpdateLogDisplayUI()
+    {
+        if (logContentText == null) return;
+
+        System.Text.StringBuilder sb = new System.Text.StringBuilder();
+        sb.AppendLine("<size=16><b>=== REFINERY SCADA AUDIT TRAIL & OPERATOR LOGS ===</b></size>\n");
+
+        for (int i = 0; i < operationalAuditLog.Count; i++)
+        {
+            sb.AppendLine(operationalAuditLog[i]);
+            sb.AppendLine("<color=#223344>─────────────────────────────────────────────────────────────────</color>");
+        }
+
+        logContentText.text = sb.ToString();
+
+        if (logSummaryHeader != null)
+        {
+            logSummaryHeader.text = $"AUDIT EVENTS: {operationalAuditLog.Count} | LOG STATUS: ACTIVE";
+        }
+    }
+
+    public void ToggleUserLogsModal()
+    {
+        if (userLogsModal != null)
+        {
+            SetUserLogsModalActive(!userLogsModal.activeSelf);
+        }
+    }
+
+    public void SetUserLogsModalActive(bool state)
+    {
+        if (userLogsModal != null)
+        {
+            userLogsModal.SetActive(state);
+            if (state)
+            {
+                userLogsModal.transform.SetAsLastSibling();
+                UpdateLogDisplayUI();
+            }
+        }
+    }
+
+    public void ClearUserLogs()
+    {
+        operationalAuditLog.Clear();
+        PlayerPrefs.DeleteKey(AUDIT_LOG_PREF_KEY);
+        PlayerPrefs.Save();
+        RecordLogEntry("AUDIT_RESET", "Operator manually purged session log records.", "WARNING");
+    }
+
+    private void SaveAuditLogsToStorage()
+    {
+        try
+        {
+            string serialized = string.Join("|||", operationalAuditLog);
+            PlayerPrefs.SetString(AUDIT_LOG_PREF_KEY, serialized);
+            PlayerPrefs.Save();
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError($"[SaveAuditLogs] Error: {e.Message}");
+        }
+    }
+
+    private void LoadAuditLogsFromStorage()
+    {
+        try
+        {
+            if (PlayerPrefs.HasKey(AUDIT_LOG_PREF_KEY))
+            {
+                string raw = PlayerPrefs.GetString(AUDIT_LOG_PREF_KEY);
+                if (!string.IsNullOrEmpty(raw))
+                {
+                    string[] records = raw.Split(new string[] { "|||" }, System.StringSplitOptions.RemoveEmptyEntries);
+                    operationalAuditLog = new List<string>(records);
+                }
+            }
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError($"[LoadAuditLogs] Error: {e.Message}");
         }
     }
 }
